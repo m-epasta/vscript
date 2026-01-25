@@ -1009,9 +1009,18 @@ fn (mut vm VM) import_module(path string) !Value {
 	// 0. Intercept Native Modules
 	if path == 'core/fs.vs' {
 		val := create_fs_module(mut vm)
-		// Cache it manually since the caller (op_import) does it,
-		// but op_import logic is: if not cached, call import_module, then cache result.
-		// So we just return the value.
+		return val
+	}
+	if path == 'core/tmpfile.vs' {
+		val := create_tmpfile_module(mut vm)
+		return val
+	}
+	if path == 'core/json.vs' {
+		val := create_json_module(mut vm)
+		return val
+	}
+	if path == 'core/http.vs' {
+		val := create_http_module(mut vm)
 		return val
 	}
 
