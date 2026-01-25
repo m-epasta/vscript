@@ -26,6 +26,7 @@ mut:
 	stack_top     int
 	globals       map[string]Value
 	open_upvalues []&Upvalue
+	is_test_mode  bool
 }
 
 fn new_vm() VM {
@@ -62,6 +63,7 @@ fn new_vm() VM {
 			stack_top:     0
 			globals:       map[string]Value{}
 			open_upvalues: []&Upvalue{}
+			is_test_mode:  false
 		}
 		vm.register_stdlib()
 		return vm
@@ -72,13 +74,14 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 	mut scanner := new_scanner(source)
 	tokens := scanner.scan_tokens()
 
-	mut parser := new_parser(tokens)
+	mut parser := new_parser(tokens, vm.is_test_mode)
 	stmts := parser.parse() or {
 		eprintln('Parse error: ${err}')
 		return .compile_error
 	}
 
 	mut compiler := new_compiler(none, .type_script)
+	// Top level script has no attributes
 	function := compiler.compile(stmts) or { return .compile_error }
 
 	closure := ClosureValue{
@@ -881,4 +884,61 @@ fn (vm &VM) typeof(val Value) string {
 
 fn (vm &VM) runtime_error(message string) {
 	eprintln('Runtime error: ${message}')
+}
+
+// Run all functions marked with @[test]
+fn (mut vm VM) run_test_suite() bool {
+	print('\nRunning tests...\n')
+	mut passed := 0
+	mut failed := 0
+
+	// Collect test functions to avoid map iteration issues during execution
+	mut tests := []string{}
+	for name, val in vm.globals {
+		if val is ClosureValue {
+			// Check for 'test' attribute
+			// Note: function attributes are stored in val.function.attributes
+			if 'test' in val.function.attributes {
+				tests << name
+			}
+		}
+	}
+
+	if tests.len == 0 {
+		println('No tests found.')
+		return true
+	}
+
+	// Sort for stable order
+	tests.sort()
+
+	for name in tests {
+		print('test ${name} ... ')
+		val := vm.globals[name] or { Value(NilValue{}) }
+
+		vm.push(val)
+		if vm.call_value(val, 0) {
+			initial_frames := vm.frame_count
+			res := vm.run(initial_frames)
+			match res {
+				.ok {
+					println('ok')
+					passed++
+				}
+				else {
+					println('FAILED')
+					failed++
+				}
+			}
+		} else {
+			println('FAILED (call setup)')
+			failed++
+		}
+
+		// Reset stack
+		vm.stack_top = 0
+	}
+
+	println('\ntest result: ${if failed == 0 { 'ok' } else { 'FAILED' }}. ${passed} passed; ${failed} failed.')
+	return failed == 0
 }

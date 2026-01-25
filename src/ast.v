@@ -140,6 +140,9 @@ type Stmt = ExprStmt
 	| ClassStmt
 	| StructStmt
 	| EnumStmt
+	| EmptyStmt
+
+struct EmptyStmt {}
 
 struct ExprStmt {
 	expression Expr

@@ -111,33 +111,18 @@ print(range(5)); // [0, 1, 2, 3, 4]
 
 ### `map(arr, func)`
 Transforms each element using a function.
-```vscript
-var doubled = map([1, 2], fn(x) { return x * 2; });
-```
 
 ### `filter(arr, func)`
 Keeps elements matching the predicate.
-```vscript
-var evens = filter([1, 2, 3, 4], fn(x) { return x % 2 == 0; });
-```
 
 ### `reduce(arr, func, initial)`
 Combines elements into a single value.
-```vscript
-var sum = reduce([1, 2, 3], fn(acc, x) { return acc + x; }, 0);
-```
 
 ### `find(arr, func)` / `any(arr, func)` / `all(arr, func)`
 Search and logic helpers.
-```vscript
-print(any([0, 1], fn(x) { return x > 0; })); // true
-```
 
 ### `first(arr)` / `last(arr)`
 Accessors for the start and end of arrays.
-```vscript
-print(first([10, 20])); // 10
-```
 
 ---
 
@@ -146,29 +131,16 @@ High-level function wrappers for performance.
 
 ### `memoize(func)`
 Returns a version of the function that caches results.
-```vscript
-var slow_fib = memoize(fn(n) { ... });
-```
 
 ### `lru_cache(func, capacity)`
 Advanced memoization with a Least Recently Used eviction policy.
-```vscript
-var cached = lru_cache(expensive_fn, 50);
-```
 
-### `apply(func, args_array)`
+### `apply(func, args_array)` 
 Invokes a function with an array of arguments.
-```vscript
-apply(print, ["dynamic", "call"]);
-```
-
----
 
 ## Utilities
 ### `clock()`
 Returns high-precision monotonic time (seconds).
-```vscript
 var start = clock();
 // ...
 print(clock() - start);
-```

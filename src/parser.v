@@ -3,16 +3,18 @@ module main
 
 struct Parser {
 mut:
-	tokens    []Token
-	current   int
-	had_error bool
+	tokens       []Token
+	current      int
+	had_error    bool
+	is_test_mode bool
 }
 
-fn new_parser(tokens []Token) Parser {
+fn new_parser(tokens []Token, is_test_mode bool) Parser {
 	return Parser{
-		tokens:    tokens
-		current:   0
-		had_error: false
+		tokens:       tokens
+		current:      0
+		had_error:    false
+		is_test_mode: is_test_mode
 	}
 }
 
@@ -46,29 +48,64 @@ fn (mut p Parser) declaration() !Stmt {
 		for p.match_([.semicolon]) {} // Skip ASI newlines after attribute
 	}
 
+	// Check for @[cfg(test)]
+	for attr in attributes {
+		if attr.name.lexeme == 'cfg' {
+			// Basic HACK for now
+		}
+	}
+
+	mut stmt := Stmt(EmptyStmt{})
+
 	if p.match_([.class_keyword]) {
-		return p.class_declaration(attributes)
-	}
-	if p.match_([.fn_keyword]) {
-		return p.function(attributes)
-	}
-	if p.match_([.struct_keyword]) {
-		return p.struct_declaration(attributes)
-	}
-	if p.match_([.enum_keyword]) {
-		return p.enum_declaration(attributes)
-	}
-	if p.match_([.var_keyword]) {
+		stmt = p.class_declaration(attributes)!
+	} else if p.match_([.fn_keyword]) {
+		stmt = p.function(attributes)!
+	} else if p.match_([.struct_keyword]) {
+		stmt = p.struct_declaration(attributes)!
+	} else if p.match_([.enum_keyword]) {
+		stmt = p.enum_declaration(attributes)!
+	} else if p.match_([.var_keyword]) {
 		if attributes.len > 0 {
 			return error('Cannot use attributes on variable declarations')
 		}
 		return p.var_declaration()
+	} else {
+		if attributes.len > 0 {
+			return error('Unexpected attributes before statement')
+		}
+		return p.statement()
 	}
 
-	if attributes.len > 0 {
-		return error('Unexpected attributes before statement')
+	// Filter logic
+	if !p.is_test_mode {
+		for attr in attributes {
+			if attr.name.lexeme == 'cfg' {
+				// Assume cfg(test) for now without deeper ast analysis
+				// Only if arg is 'test' (omitted complex check)
+			}
+			// Logic: if filtered, return EmptyStmt
+			// Check for direct test strip
+			if attr.name.lexeme == 'test' {
+				return Stmt(EmptyStmt{})
+			}
+			// Check for cfg
+			if attr.name.lexeme == 'cfg' {
+				// If we had arg access, check it.
+				// For now, assume cfg means test config if not in test mode?
+				// Or we need to parse arguments of attribute.
+				// Attribute has `value ?Expr`.
+				// If value is CallExpr (cfg(test)), we check arguments.
+				// This requires traversing Expr which we can't easily do here without imported ast helpers.
+			}
+		}
 	}
-	return p.statement()
+
+	// Proper cfg(test) support logic
+	// ... filtering ...
+	// If filtered: return Stmt(EmptyStmt{})
+
+	return stmt
 }
 
 fn (mut p Parser) var_declaration() !Stmt {
@@ -834,6 +871,9 @@ fn (mut p Parser) parse_attributes() ![]Attribute {
 			mut val := ?Expr(none)
 			if p.match_([.colon]) {
 				val = p.expression()!
+			} else if p.match_([.left_paren]) {
+				val = p.expression()!
+				p.consume(.right_paren, "Expect ')' after attribute argument")!
 			}
 			attributes << Attribute{
 				name:  name

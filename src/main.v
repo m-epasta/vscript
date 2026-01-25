@@ -44,7 +44,14 @@ fn main() {
 				eprintln('Error: Please specify code to run')
 				exit(1)
 			}
-			run_string(args[1])
+			run_string(args[1], false)
+		}
+		'test' {
+			if args.len < 2 {
+				eprintln('Error: Please specify a file to test')
+				exit(1)
+			}
+			run_tests(args[1])
 		}
 		else {
 			// Default: Run with VM
@@ -58,11 +65,20 @@ fn run_file(path string) {
 		eprintln('Error: Could not read file "${path}"')
 		exit(74)
 	}
-	run_string(source)
+	run_string(source, false)
 }
 
-fn run_string(source string) {
+fn run_tests(path string) {
+	source := os.read_file(path) or {
+		eprintln('Error: Could not read file "${path}"')
+		exit(74)
+	}
+	run_string(source, true)
+}
+
+fn run_string(source string, is_test_mode bool) {
 	mut vm := new_vm()
+	vm.is_test_mode = is_test_mode
 	result := vm.interpret(source)
 
 	match result {
@@ -74,7 +90,13 @@ fn run_string(source string) {
 			eprintln('Runtime error')
 			exit(70)
 		}
-		.ok {}
+		.ok {
+			if is_test_mode {
+				if !vm.run_test_suite() {
+					exit(1)
+				}
+			}
+		}
 	}
 }
 
@@ -89,7 +111,7 @@ fn transpile_and_show(path string) {
 	tokens := scanner.scan_tokens()
 
 	// Parse
-	mut parser := new_parser(tokens)
+	mut parser := new_parser(tokens, false)
 	stmts := parser.parse() or {
 		eprintln('Parse error: ${err}')
 		exit(65)
@@ -114,7 +136,7 @@ fn transpile_to_file(path string) {
 	tokens := scanner.scan_tokens()
 
 	// Parse
-	mut parser := new_parser(tokens)
+	mut parser := new_parser(tokens, false)
 	stmts := parser.parse() or {
 		eprintln('Parse error: ${err}')
 		exit(65)

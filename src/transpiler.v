@@ -25,6 +25,7 @@ fn (mut t Transpiler) transpile_stmts(stmts []Stmt) string {
 
 fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 	match stmt {
+		EmptyStmt {}
 		ExprStmt {
 			t.indent()
 			t.visit_expr(stmt.expression)

@@ -706,6 +706,41 @@ fn native_optimize(mut vm VM, args []Value) Value {
 	return Value(NilValue{})
 }
 
+fn native_assert(mut vm VM, args []Value) Value {
+	if is_falsey(args[0]) {
+		msg := if args.len > 1 { value_to_string(args[1]) } else { 'Assertion failed' }
+		vm.runtime_error(msg)
+		return Value(NilValue{})
+	}
+	return Value(true)
+}
+
+fn native_assert_eq(mut vm VM, args []Value) Value {
+	if !values_equal(args[0], args[1]) {
+		msg := if args.len > 2 {
+			value_to_string(args[2])
+		} else {
+			'Assertion failed: ${value_to_string(args[0])} != ${value_to_string(args[1])}'
+		}
+		vm.runtime_error(msg)
+		return Value(NilValue{})
+	}
+	return Value(true)
+}
+
+fn native_assert_ne(mut vm VM, args []Value) Value {
+	if values_equal(args[0], args[1]) {
+		msg := if args.len > 2 {
+			value_to_string(args[2])
+		} else {
+			'Assertion failed: ${value_to_string(args[0])} == ${value_to_string(args[1])}'
+		}
+		vm.runtime_error(msg)
+		return Value(NilValue{})
+	}
+	return Value(true)
+}
+
 fn (mut vm VM) register_stdlib() {
 	vm.define_native('clock', 0, native_clock)
 	vm.define_native('len', 1, native_len)
@@ -747,6 +782,9 @@ fn (mut vm VM) register_stdlib() {
 	vm.define_native('json_encode', 1, native_json_encode)
 	vm.define_native('json_decode', 1, native_json_decode)
 	vm.define_native('optimize', 2, native_optimize)
+	vm.define_native('assert', -1, native_assert)
+	vm.define_native('assert_eq', -1, native_assert_eq)
+	vm.define_native('assert_ne', -1, native_assert_ne)
 
 	// Built-in Types
 
@@ -755,7 +793,7 @@ fn (mut vm VM) register_stdlib() {
 		name:     'Result'
 		variants: ['ok', 'err']
 	}
-	
+
 	// Option
 	vm.globals['Option'] = EnumValue{
 		name:     'Option'

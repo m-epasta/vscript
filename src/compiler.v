@@ -121,6 +121,7 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			c.patch_jump(exit_jump)
 			c.emit_byte(u8(OpCode.op_pop))
 		}
+		EmptyStmt {}
 		ForStmt {
 			c.begin_scope()
 
@@ -192,7 +193,8 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 					}
 				}
 
-				c.compile_function(method.name.lexeme, method.params, method.body, .type_function)!
+				c.compile_function(method.name.lexeme, method.params, method.body, .type_function,
+					method.attributes)!
 
 				// Wrap method
 				for i := method.attributes.len - 1; i >= 0; i-- {
@@ -349,7 +351,8 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 			c.emit_byte(u8(OpCode.op_index_set))
 		}
 		FunctionExpr {
-			c.compile_function('(anonymous)', expr.params, expr.body, .type_function)!
+			c.compile_function('(anonymous)', expr.params, expr.body, .type_function,
+				expr.attributes)!
 		}
 		MapExpr {
 			for i in 0 .. expr.keys.len {
@@ -487,7 +490,7 @@ fn (mut c Compiler) function(stmt FunctionStmt) ! {
 	}
 
 	// 2. Compile the core closure
-	c.compile_function(stmt.name.lexeme, stmt.params, stmt.body, .type_function)!
+	c.compile_function(stmt.name.lexeme, stmt.params, stmt.body, .type_function, stmt.attributes)!
 
 	// 3. Emit wrapper calls
 	// We need to apply them in reverse order of how their globals were pushed (standard stack behavior)
@@ -507,7 +510,7 @@ fn (mut c Compiler) function(stmt FunctionStmt) ! {
 	c.emit_bytes(u8(OpCode.op_set_global), name_const)
 }
 
-fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, type_ FunctionType) ! {
+fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, type_ FunctionType, attributes []Attribute) ! {
 	mut compiler := new_compiler(c, type_)
 
 	// Reserve slot 0 for the function itself or 'this'
@@ -530,11 +533,18 @@ fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, t
 		compiler.emit_return()
 	}
 
+	// Convert attributes to string list for runtime
+	mut attr_names := []string{}
+	for attr in attributes {
+		attr_names << attr.name.lexeme
+	}
+
 	function := FunctionValue{
 		arity:          params.len
 		upvalues_count: compiler.upvalues.len
 		chunk:          compiler.chunk
 		name:           name
+		attributes:     attr_names
 	}
 
 	const_idx := c.make_constant(Value(function))

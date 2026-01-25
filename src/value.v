@@ -26,6 +26,7 @@ pub:
 	upvalues_count int
 	chunk          &Chunk
 	name           string
+	attributes     []string // Stores attribute names/values for runtime reflection (e.g. test)
 }
 
 struct ClosureValue {
