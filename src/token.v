@@ -53,6 +53,8 @@ enum TokenType {
 	try_keyword
 	catch_keyword
 	import_keyword
+	async_keyword
+	await_keyword
 
 	// Special
 	at_bracket // @[

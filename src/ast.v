@@ -24,6 +24,12 @@ type Expr = BinaryExpr
 	| SetExpr
 	| ThisExpr
 	| MatchExpr
+	| AwaitExpr
+
+struct AwaitExpr {
+	keyword Token
+	value   Expr
+}
 
 struct BinaryExpr {
 	left     Expr
@@ -84,6 +90,7 @@ struct FunctionExpr {
 	params     []Token
 	body       []Stmt
 	attributes []Attribute
+	is_async   bool
 }
 
 struct GetExpr {
@@ -171,6 +178,7 @@ struct FunctionStmt {
 	params     []Token
 	body       []Stmt
 	attributes []Attribute
+	is_async   bool
 }
 
 struct IfStmt {

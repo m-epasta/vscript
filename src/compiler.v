@@ -271,7 +271,7 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 				}
 
 				c.compile_function(method.name.lexeme, method.params, method.body, .type_function,
-					method.attributes)!
+					method.attributes, method.is_async)!
 
 				// Wrap method
 				for i := method.attributes.len - 1; i >= 0; i-- {
@@ -429,7 +429,7 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 		}
 		FunctionExpr {
 			c.compile_function('(anonymous)', expr.params, expr.body, .type_function,
-				expr.attributes)!
+				expr.attributes, expr.is_async)!
 		}
 		MapExpr {
 			for i in 0 .. expr.keys.len {
@@ -458,6 +458,10 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 		}
 		MatchExpr {
 			c.compile_match(expr)!
+		}
+		AwaitExpr {
+			c.compile_expr(expr.value)!
+			c.emit_byte(u8(OpCode.op_await))
 		}
 	}
 }
@@ -567,7 +571,8 @@ fn (mut c Compiler) function(stmt FunctionStmt) ! {
 	}
 
 	// 2. Compile the core closure
-	c.compile_function(stmt.name.lexeme, stmt.params, stmt.body, .type_function, stmt.attributes)!
+	c.compile_function(stmt.name.lexeme, stmt.params, stmt.body, .type_function, stmt.attributes,
+		stmt.is_async)!
 
 	// 3. Emit wrapper calls
 	// We need to apply them in reverse order of how their globals were pushed (standard stack behavior)
@@ -587,7 +592,7 @@ fn (mut c Compiler) function(stmt FunctionStmt) ! {
 	c.emit_bytes(u8(OpCode.op_set_global), name_const)
 }
 
-fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, type_ FunctionType, attributes []Attribute) ! {
+fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, type_ FunctionType, attributes []Attribute, is_async bool) ! {
 	mut compiler := new_compiler(c, type_)
 
 	// Reserve slot 0 for the function itself or 'this'

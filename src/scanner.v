@@ -194,6 +194,8 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'try' { .try_keyword }
 		'catch' { .catch_keyword }
 		'import' { .import_keyword }
+		'async' { .async_keyword }
+		'await' { .await_keyword }
 		else { .identifier }
 	}
 }

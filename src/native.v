@@ -488,6 +488,7 @@ fn native_type(mut vm VM, args []Value) Value {
 		EnumValue { Value('enum_type') }
 		EnumVariantValue { Value('enum_variant') }
 		BoundMethodValue { Value('function') }
+		PromiseValue { Value('promise') }
 	}
 }
 

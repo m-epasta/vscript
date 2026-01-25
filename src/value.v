@@ -12,6 +12,7 @@ type Value = ArrayValue
 	| MapValue
 	| NativeFunctionValue
 	| NilValue
+	| PromiseValue
 	| StructInstanceValue
 	| StructValue
 	| bool
@@ -27,6 +28,7 @@ pub:
 	chunk          &Chunk
 	name           string
 	attributes     []string // Stores attribute names/values for runtime reflection (e.g. test)
+	is_async       bool
 }
 
 struct ClosureValue {
@@ -95,6 +97,20 @@ struct EnumVariantValue {
 struct BoundMethodValue {
 	receiver Value
 	method   Value // Can be ClosureValue or NativeFunctionValue wrapper
+}
+
+enum PromiseStatus {
+	pending
+	resolved
+	rejected
+}
+
+struct PromiseValue {
+pub mut:
+	status PromiseStatus
+	value  Value
+	// Callback or list of waiters?
+	// For simplicity in single-threaded VM, maybe just state is enough for now.
 }
 
 @[heap]
@@ -174,6 +190,9 @@ fn value_to_string(v Value) string {
 		}
 		BoundMethodValue {
 			return value_to_string(v.method)
+		}
+		PromiseValue {
+			return '<Promise [${v.status}]>'
 		}
 	}
 }

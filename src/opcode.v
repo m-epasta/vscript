@@ -70,6 +70,10 @@ enum OpCode {
 
 	// Modules
 	op_import
+
+	// Async
+	op_async_call
+	op_await
 }
 
 fn (op OpCode) str() string {
@@ -118,5 +122,7 @@ fn (op OpCode) str() string {
 		.op_exception_push { 'OP_EXCEPTION_PUSH' }
 		.op_exception_pop { 'OP_EXCEPTION_POP' }
 		.op_import { 'OP_IMPORT' }
+		.op_async_call { 'OP_ASYNC_CALL' }
+		.op_await { 'OP_AWAIT' }
 	}
 }

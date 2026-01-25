@@ -59,8 +59,12 @@ fn (mut p Parser) declaration() !Stmt {
 
 	if p.match_([.class_keyword]) {
 		stmt = p.class_declaration(attributes)!
+	} else if p.match_([.async_keyword]) {
+		// async fn name() { ... }
+		p.consume(.fn_keyword, "Expect 'fn' after 'async'")!
+		stmt = p.function_with_async(attributes, true)!
 	} else if p.match_([.fn_keyword]) {
-		stmt = p.function(attributes)!
+		stmt = p.function_with_async(attributes, false)!
 	} else if p.match_([.struct_keyword]) {
 		stmt = p.struct_declaration(attributes)!
 	} else if p.match_([.enum_keyword]) {
@@ -126,7 +130,7 @@ fn (mut p Parser) var_declaration() !Stmt {
 	})
 }
 
-fn (mut p Parser) function(attributes []Attribute) !Stmt {
+fn (mut p Parser) function_with_async(attributes []Attribute, is_async bool) !Stmt {
 	name := p.consume(.identifier, 'Expect function name')!
 
 	p.consume(.left_paren, 'Expect ( after function name')!
@@ -150,6 +154,7 @@ fn (mut p Parser) function(attributes []Attribute) !Stmt {
 		params:     params
 		body:       body
 		attributes: attributes
+		is_async:   is_async
 	})
 }
 
@@ -276,6 +281,11 @@ fn (mut p Parser) method() !FunctionStmt {
 		for p.match_([.semicolon]) {} // Skip ASI newlines after attribute
 	}
 
+	mut is_async := false
+	if p.match_([.async_keyword]) {
+		is_async = true
+	}
+
 	name := p.consume(.identifier, 'Expect method name')!
 	p.consume(.left_paren, "Expect '(' after method name")!
 
@@ -298,6 +308,7 @@ fn (mut p Parser) method() !FunctionStmt {
 		params:     params
 		body:       body
 		attributes: attributes
+		is_async:   is_async
 	}
 }
 
@@ -649,6 +660,15 @@ fn (mut p Parser) unary() !Expr {
 		})
 	}
 
+	if p.match_([.await_keyword]) {
+		keyword := p.previous()
+		value := p.unary()!
+		return Expr(AwaitExpr{
+			keyword: keyword
+			value:   value
+		})
+	}
+
 	return p.call()
 }
 
@@ -754,8 +774,13 @@ fn (mut p Parser) primary() !Expr {
 		return p.map_literal()
 	}
 
+	if p.match_([.async_keyword]) {
+		p.consume(.fn_keyword, "Expect 'fn' after 'async'")!
+		return p.function_expression_with_async(true)
+	}
+
 	if p.match_([.fn_keyword]) {
-		return p.function_expression()
+		return p.function_expression_with_async(false)
 	}
 
 	if p.match_([.match_keyword]) {
@@ -765,7 +790,7 @@ fn (mut p Parser) primary() !Expr {
 	return error('Expect expression')
 }
 
-fn (mut p Parser) function_expression() !Expr {
+fn (mut p Parser) function_expression_with_async(is_async bool) !Expr {
 	p.consume(.left_paren, 'Expect ( after fn')!
 	mut params := []Token{}
 	if !p.check(.right_paren) {
@@ -783,6 +808,7 @@ fn (mut p Parser) function_expression() !Expr {
 		params:     params
 		body:       body
 		attributes: []Attribute{}
+		is_async:   is_async
 	})
 }
 

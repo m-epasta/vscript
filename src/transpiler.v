@@ -57,6 +57,9 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 		}
 		FunctionStmt {
 			t.indent()
+			if stmt.is_async {
+				t.output.write_string('async ')
+			}
 			t.output.write_string('function ')
 			t.output.write_string(stmt.name.lexeme)
 			t.output.write_string('(')
@@ -310,6 +313,9 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.visit_expr(expr.value)
 		}
 		FunctionExpr {
+			if expr.is_async {
+				t.output.write_string('async ')
+			}
 			t.output.write_string('function(')
 			for i, param in expr.params {
 				if i > 0 {
@@ -344,6 +350,11 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 		MatchExpr {
 			// TODO: Implement JS transpilation for pattern matching
 			t.output.write_string('/* match expression stub */')
+		}
+		AwaitExpr {
+			t.output.write_string('(await ')
+			t.visit_expr(expr.value)
+			t.output.write_string(')')
 		}
 	}
 }

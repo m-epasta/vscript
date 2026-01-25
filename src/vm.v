@@ -775,6 +775,24 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					return .runtime_error
 				}
 			}
+			.op_await {
+				val := vm.pop()
+				if val is PromiseValue {
+					p := val as PromiseValue
+					if p.status == .pending {
+						// For now, in our single-threaded VM, await on native ops
+						// would just block or spin.
+						// In Phase 17 we can add real yielding.
+					}
+					vm.push(p.value)
+				} else {
+					vm.push(val)
+				}
+			}
+			.op_async_call {
+				// To be implemented: starts a task
+				// For now fallback to normal call behavior but return Promise
+			}
 		}
 	}
 	return .ok
@@ -984,6 +1002,7 @@ fn (vm &VM) typeof(val Value) string {
 		EnumValue { 'enum_type' }
 		EnumVariantValue { 'enum_variant' }
 		BoundMethodValue { 'function' }
+		PromiseValue { 'promise' }
 	}
 }
 
