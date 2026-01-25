@@ -114,6 +114,27 @@ fn native_printf(mut vm VM, args []Value) Value {
 	return Value(NilValue{})
 }
 
+fn native_print(mut vm VM, args []Value) Value {
+	for i, arg in args {
+		print(value_to_string(arg))
+		if i < args.len - 1 {
+			print(' ')
+		}
+	}
+	return Value(NilValue{})
+}
+
+fn native_println(mut vm VM, args []Value) Value {
+	for i, arg in args {
+		print(value_to_string(arg))
+		if i < args.len - 1 {
+			print(' ')
+		}
+	}
+	println('')
+	return Value(NilValue{})
+}
+
 fn native_eprint(mut vm VM, args []Value) Value {
 	for arg in args {
 		eprint(value_to_string(arg))
@@ -460,6 +481,9 @@ fn native_type(mut vm VM, args []Value) Value {
 		FunctionValue, ClosureValue, NativeFunctionValue { Value('function') }
 		ArrayValue { Value('array') }
 		MapValue { Value('map') }
+		ClassValue { Value('class') }
+		InstanceValue { Value('instance') }
+		BoundMethodValue { Value('function') }
 	}
 }
 
@@ -674,7 +698,6 @@ fn native_is_alpha(mut vm VM, args []Value) Value {
 	return Value(false)
 }
 
-// Simplified alphanumeric, whitespace etc...
 fn native_optimize(mut vm VM, args []Value) Value {
 	return Value(NilValue{})
 }
@@ -687,6 +710,8 @@ fn (mut vm VM) register_stdlib() {
 	vm.define_native('sqrt', 1, native_sqrt)
 	vm.define_native('floor', 1, native_floor)
 	vm.define_native('printf', -1, native_printf)
+	vm.define_native('print', -1, native_print)
+	vm.define_native('println', -1, native_println)
 	vm.define_native('eprint', -1, native_eprint)
 	vm.define_native('type', 1, native_type)
 	vm.define_native('to_string', 1, native_to_string)

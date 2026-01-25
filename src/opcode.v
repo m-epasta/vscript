@@ -50,6 +50,12 @@ enum OpCode {
 	op_get_upvalue
 	op_set_upvalue
 	op_close_upvalue
+
+	// OOP
+	op_class
+	op_get_property
+	op_set_property
+	op_method
 }
 
 fn (op OpCode) str() string {
@@ -87,5 +93,9 @@ fn (op OpCode) str() string {
 		.op_get_upvalue { 'OP_GET_UPVALUE' }
 		.op_set_upvalue { 'OP_SET_UPVALUE' }
 		.op_close_upvalue { 'OP_CLOSE_UPVALUE' }
+		.op_class { 'OP_CLASS' }
+		.op_get_property { 'OP_GET_PROPERTY' }
+		.op_set_property { 'OP_SET_PROPERTY' }
+		.op_method { 'OP_METHOD' }
 	}
 }

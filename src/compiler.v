@@ -6,6 +6,11 @@ enum FunctionType {
 	type_function
 }
 
+enum ClassType {
+	type_none
+	type_class
+}
+
 struct UpvalueMetadata {
 mut:
 	index    int
@@ -21,6 +26,7 @@ mut:
 	locals        []Local
 	local_count   int
 	scope_depth   int
+	class_type    ClassType
 }
 
 struct Local {
@@ -44,6 +50,7 @@ fn new_compiler(enclosing ?&Compiler, type_ FunctionType) Compiler {
 			locals:        []Local{len: 256}
 			local_count:   0
 			scope_depth:   0
+			class_type:    if enclosing != none { enclosing.class_type } else { .type_none }
 		}
 	}
 }
@@ -163,6 +170,29 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 				c.compile_stmt(s)!
 			}
 			c.end_scope()
+		}
+		ClassStmt {
+			name_const := c.make_constant(Value(stmt.name.lexeme))
+			c.emit_bytes(u8(OpCode.op_class), name_const)
+			c.emit_bytes(u8(OpCode.op_set_global), name_const)
+
+			c.named_variable(stmt.name, false)!
+
+			old_class_type := c.class_type
+			c.class_type = .type_class
+
+			for method in stmt.methods {
+				meth_name_const := c.make_constant(Value(method.name.lexeme))
+				c.compile_function(method.name.lexeme, method.params, method.body, .type_function)!
+				c.emit_bytes(u8(OpCode.op_method), meth_name_const)
+			}
+
+			c.emit_byte(u8(OpCode.op_pop))
+			c.class_type = old_class_type
+		}
+		PrintStmt {
+			c.compile_expr(stmt.expression)!
+			c.emit_byte(u8(OpCode.op_print))
 		}
 	}
 }
@@ -287,6 +317,24 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 			}
 			c.emit_bytes(u8(OpCode.op_build_map), u8(expr.keys.len))
 		}
+		GetExpr {
+			c.compile_expr(expr.object)!
+			name_const := c.make_constant(Value(expr.name.lexeme))
+			c.emit_bytes(u8(OpCode.op_get_property), name_const)
+		}
+		SetExpr {
+			c.compile_expr(expr.object)!
+			c.compile_expr(expr.value)!
+			name_const := c.make_constant(Value(expr.name.lexeme))
+			c.emit_bytes(u8(OpCode.op_set_property), name_const)
+		}
+		ThisExpr {
+			if c.class_type == .type_none {
+				return error("Cannot use 'this' outside of a class")
+			}
+			c.named_variable(Token{ type_: .this_keyword, lexeme: 'this', line: expr.keyword.line },
+				false)!
+		}
 	}
 }
 
@@ -300,9 +348,9 @@ fn (mut c Compiler) function(stmt FunctionStmt) ! {
 fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, type_ FunctionType) ! {
 	mut compiler := new_compiler(c, type_)
 
-	// Reserve slot 0 for the function itself
+	// Reserve slot 0 for the function itself or 'this'
 	compiler.locals[0] = Local{
-		name:  ''
+		name:  if type_ != .type_script && c.class_type != .type_none { 'this' } else { '' }
 		depth: 0
 	}
 	compiler.local_count++
@@ -315,7 +363,12 @@ fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, t
 		compiler.compile_stmt(s)!
 	}
 
-	compiler.emit_return()
+	if name == 'init' {
+		compiler.emit_bytes(u8(OpCode.op_get_local), 0)
+		compiler.emit_byte(u8(OpCode.op_return))
+	} else {
+		compiler.emit_return()
+	}
 
 	function := FunctionValue{
 		arity:          params.len

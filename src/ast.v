@@ -14,6 +14,9 @@ type Expr = BinaryExpr
 	| IndexExpr
 	| AssignIndexExpr
 	| FunctionExpr
+	| GetExpr
+	| SetExpr
+	| ThisExpr
 
 struct BinaryExpr {
 	left     Expr
@@ -75,6 +78,21 @@ struct FunctionExpr {
 	body   []Stmt
 }
 
+struct GetExpr {
+	object Expr
+	name   Token
+}
+
+struct SetExpr {
+	object Expr
+	name   Token
+	value  Expr
+}
+
+struct ThisExpr {
+	keyword Token
+}
+
 // Statement types
 type Stmt = ExprStmt
 	| VarStmt
@@ -84,8 +102,14 @@ type Stmt = ExprStmt
 	| ForStmt
 	| ReturnStmt
 	| BlockStmt
+	| ClassStmt
+	| PrintStmt
 
 struct ExprStmt {
+	expression Expr
+}
+
+struct PrintStmt {
 	expression Expr
 }
 
@@ -125,4 +149,9 @@ struct ReturnStmt {
 
 struct BlockStmt {
 	statements []Stmt
+}
+
+struct ClassStmt {
+	name    Token
+	methods []FunctionStmt
 }

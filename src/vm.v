@@ -5,9 +5,15 @@ import math
 
 const stack_max = 256
 
+enum InterpretResult {
+	ok
+	compile_error
+	runtime_error
+}
+
 struct CallFrame {
 mut:
-	closure &ClosureValue
+	closure ClosureValue
 	ip      int
 	slots   int
 }
@@ -22,42 +28,40 @@ mut:
 	open_upvalues []&Upvalue
 }
 
-enum InterpretResult {
-	ok
-	compile_error
-	runtime_error
-}
-
 fn new_vm() VM {
 	unsafe {
 		dummy_chunk := &Chunk{
-			code:      []u8{cap: 32}
-			constants: []Value{cap: 8}
-			lines:     []int{cap: 32}
+			code:      []u8{cap: 1}
+			constants: []Value{cap: 1}
+			lines:     []int{cap: 1}
 		}
-		dummy_fn := &FunctionValue{
+		dummy_fn := FunctionValue{
 			arity:          0
 			upvalues_count: 0
 			chunk:          dummy_chunk
 			name:           'dummy'
 		}
-		dummy_closure := &ClosureValue{
+		dummy_closure := ClosureValue{
 			function: dummy_fn
 			upvalues: []&Upvalue{}
 		}
 
-		mut vm := VM{
-			frames:        []CallFrame{len: 64, init: CallFrame{
+		mut frames := []CallFrame{cap: 64}
+		for _ in 0 .. 64 {
+			frames << CallFrame{
 				closure: dummy_closure
-			}}
+				ip:      0
+				slots:   0
+			}
+		}
+
+		mut vm := VM{
+			frames:        frames
 			frame_count:   0
 			stack:         []Value{len: stack_max, init: NilValue{}}
 			stack_top:     0
 			globals:       map[string]Value{}
 			open_upvalues: []&Upvalue{}
-		}
-		for i in 0 .. 64 {
-			vm.frames[i].closure = dummy_closure
 		}
 		vm.register_stdlib()
 		return vm
@@ -75,16 +79,14 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 	}
 
 	mut compiler := new_compiler(none, .type_script)
-	mut function := compiler.compile(stmts) or { return .compile_error }
+	function := compiler.compile(stmts) or { return .compile_error }
 
-	// Wrap script in a closure
-	mut fn_ptr := &function
-	mut closure := &ClosureValue{
-		function: fn_ptr
+	closure := ClosureValue{
+		function: function
 		upvalues: []&Upvalue{}
 	}
 
-	vm.push(Value(*closure))
+	vm.push(Value(closure))
 	vm.call_closure(closure, 0) or { return .runtime_error }
 
 	return vm.run(0)
@@ -92,24 +94,16 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 
 fn (mut vm VM) run(target_frame_count int) InterpretResult {
 	for vm.frame_count > target_frame_count {
-		frame_idx := vm.frame_count - 1
-		mut frame := &vm.frames[frame_idx]
+		f_idx := vm.frame_count - 1
 
-		$if debug ? {
-			print('          ')
-			for i := 0; i < vm.stack_top; i++ {
-				print('[ ${value_to_string(vm.stack[i])} ]')
-			}
-			println('')
-			frame.closure.function.chunk.disassemble_instruction(frame.ip)
-		}
-
-		instruction := unsafe { OpCode(frame.closure.function.chunk.code[frame.ip]) }
-		frame.ip++
+		instruction := unsafe { OpCode(vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]) }
+		vm.frames[f_idx].ip++
 
 		match instruction {
 			.op_constant {
-				constant := vm.read_constant(frame_idx)
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				constant := vm.frames[f_idx].closure.function.chunk.constants[byte]
 				vm.push(constant)
 			}
 			.op_nil {
@@ -125,15 +119,20 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				vm.pop()
 			}
 			.op_get_local {
-				slot := vm.read_byte(frame_idx)
-				vm.push(vm.stack[frame.slots + int(slot)])
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				val := vm.stack[vm.frames[f_idx].slots + int(byte)]
+				vm.push(val)
 			}
 			.op_set_local {
-				slot := vm.read_byte(frame_idx)
-				vm.stack[frame.slots + int(slot)] = vm.peek(0)
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				vm.stack[vm.frames[f_idx].slots + int(byte)] = vm.peek(0)
 			}
 			.op_get_global {
-				name := vm.read_constant(frame_idx)
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name := vm.frames[f_idx].closure.function.chunk.constants[byte]
 				if name is string {
 					if val := vm.globals[name] {
 						vm.push(val)
@@ -144,7 +143,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				}
 			}
 			.op_set_global {
-				name := vm.read_constant(frame_idx)
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name := vm.frames[f_idx].closure.function.chunk.constants[byte]
 				if name is string {
 					vm.globals[name] = vm.peek(0)
 					vm.pop()
@@ -153,110 +154,157 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 			.op_equal {
 				b := vm.pop()
 				a := vm.pop()
-				vm.push(Value(values_equal(a, b)))
+				vm.push(values_equal(a, b))
 			}
 			.op_greater {
-				vm.binary_op_bool(fn (a f64, b f64) bool {
-					return a > b
-				}) or { return .runtime_error }
+				v_b := vm.pop()
+				v_a := vm.pop()
+				if v_a is f64 && v_b is f64 {
+					vm.push(v_a > v_b)
+				} else {
+					vm.runtime_error('Operands must be numbers')
+					return .runtime_error
+				}
 			}
 			.op_less {
-				vm.binary_op_bool(fn (a f64, b f64) bool {
-					return a < b
-				}) or { return .runtime_error }
+				v_b := vm.pop()
+				v_a := vm.pop()
+				if v_a is f64 && v_b is f64 {
+					vm.push(v_a < v_b)
+				} else {
+					vm.runtime_error('Operands must be numbers')
+					return .runtime_error
+				}
 			}
 			.op_add {
-				b := vm.pop()
-				a := vm.pop()
-				if a is f64 && b is f64 {
-					vm.push(Value(a + b))
-				} else if a is string && b is string {
-					vm.push(Value(a + b))
+				v_b := vm.pop()
+				v_a := vm.pop()
+				if v_a is f64 && v_b is f64 {
+					vm.push(v_a + v_b)
+				} else if v_a is string || v_b is string {
+					vm.push(value_to_string(v_a) + value_to_string(v_b))
 				} else {
 					vm.runtime_error('Operands must be two numbers or two strings')
 					return .runtime_error
 				}
 			}
 			.op_subtract {
-				vm.binary_op(fn (a f64, b f64) f64 {
-					return a - b
-				}) or { return .runtime_error }
+				v_b := vm.pop()
+				v_a := vm.pop()
+				if v_a is f64 && v_b is f64 {
+					vm.push(v_a - v_b)
+				} else {
+					vm.runtime_error('Operands must be numbers')
+					return .runtime_error
+				}
 			}
 			.op_multiply {
-				vm.binary_op(fn (a f64, b f64) f64 {
-					return a * b
-				}) or { return .runtime_error }
+				v_b := vm.pop()
+				v_a := vm.pop()
+				if v_a is f64 && v_b is f64 {
+					vm.push(v_a * v_b)
+				} else {
+					vm.runtime_error('Operands must be numbers')
+					return .runtime_error
+				}
 			}
 			.op_divide {
-				vm.binary_op(fn (a f64, b f64) f64 {
-					return a / b
-				}) or { return .runtime_error }
+				v_b := vm.pop()
+				v_a := vm.pop()
+				if v_a is f64 && v_b is f64 {
+					vm.push(v_a / v_b)
+				} else {
+					vm.runtime_error('Operands must be numbers')
+					return .runtime_error
+				}
 			}
 			.op_modulo {
-				vm.binary_op(fn (a f64, b f64) f64 {
-					return math.fmod(a, b)
-				}) or { return .runtime_error }
+				v_b := vm.pop()
+				v_a := vm.pop()
+				if v_a is f64 && v_b is f64 {
+					vm.push(math.fmod(v_a, v_b))
+				} else {
+					vm.runtime_error('Operands must be numbers')
+					return .runtime_error
+				}
 			}
 			.op_not {
-				vm.push(Value(is_falsey(vm.pop())))
+				vm.push(is_falsey(vm.pop()))
 			}
 			.op_negate {
 				v := vm.pop()
 				if v is f64 {
 					res := -v
-					vm.push(Value(res))
+					vm.push(res)
 				} else {
 					vm.runtime_error('Operand must be a number')
 					return .runtime_error
 				}
 			}
 			.op_jump {
-				offset := vm.read_short(frame_idx)
-				frame.ip += int(offset)
+				b1 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				b2 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip + 1]
+				vm.frames[f_idx].ip += 2
+				offset := (u16(b1) << 8) | u16(b2)
+				vm.frames[f_idx].ip += int(offset)
 			}
 			.op_jump_if_false {
-				offset := vm.read_short(frame_idx)
+				b1 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				b2 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip + 1]
+				vm.frames[f_idx].ip += 2
+				offset := (u16(b1) << 8) | u16(b2)
 				if is_falsey(vm.peek(0)) {
-					frame.ip += int(offset)
+					vm.frames[f_idx].ip += int(offset)
 				}
 			}
 			.op_loop {
-				offset := vm.read_short(frame_idx)
-				frame.ip -= int(offset)
+				b1 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				b2 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip + 1]
+				vm.frames[f_idx].ip += 2
+				offset := (u16(b1) << 8) | u16(b2)
+				vm.frames[f_idx].ip -= int(offset)
 			}
 			.op_call {
-				arg_count := vm.read_byte(frame_idx)
+				arg_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
 				if !vm.call_value(vm.peek(int(arg_count)), int(arg_count)) {
 					return .runtime_error
 				}
 			}
 			.op_closure {
-				function := vm.read_constant(frame_idx)
-				if function is FunctionValue {
-					mut closure := &ClosureValue{
-						function: &function
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				constant := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				if constant is FunctionValue {
+					func_val := constant as FunctionValue
+					mut cl := ClosureValue{
+						function: func_val
 						upvalues: []&Upvalue{}
 					}
-					for _ in 0 .. function.upvalues_count {
-						is_local := vm.read_byte(frame_idx) == 1
-						index := vm.read_byte(frame_idx)
+					for _ in 0 .. func_val.upvalues_count {
+						is_local := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip] == 1
+						vm.frames[f_idx].ip++
+						index := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+						vm.frames[f_idx].ip++
 						if is_local {
-							closure.upvalues << vm.capture_upvalue(frame.slots + int(index))
+							cl.upvalues << vm.capture_upvalue(vm.frames[f_idx].slots + int(index))
 						} else {
-							closure.upvalues << frame.closure.upvalues[index]
+							cl.upvalues << vm.frames[f_idx].closure.upvalues[index]
 						}
 					}
-					vm.push(Value(*closure))
+					vm.push(Value(cl))
 				}
 			}
 			.op_get_upvalue {
-				slot := vm.read_byte(frame_idx)
-				vm.push(*frame.closure.upvalues[slot].value)
+				slot := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				vm.push(*vm.frames[f_idx].closure.upvalues[slot].value)
 			}
 			.op_set_upvalue {
-				slot := vm.read_byte(frame_idx)
+				slot := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
 				unsafe {
-					*frame.closure.upvalues[slot].value = vm.peek(0)
+					*vm.frames[f_idx].closure.upvalues[slot].value = vm.peek(0)
 				}
 			}
 			.op_close_upvalue {
@@ -265,21 +313,23 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 			}
 			.op_return {
 				result := vm.pop()
-				vm.close_upvalues(frame.slots)
+				slots := vm.frames[f_idx].slots
+				vm.close_upvalues(slots)
 				vm.frame_count--
 				if vm.frame_count <= target_frame_count {
-					vm.stack_top = frame.slots
+					vm.stack_top = slots
 					vm.push(result)
 					return .ok
 				}
-				vm.stack_top = frame.slots
+				vm.stack_top = slots
 				vm.push(result)
 			}
 			.op_print {
 				println(value_to_string(vm.pop()))
 			}
 			.op_build_array {
-				arg_count := vm.read_byte(frame_idx)
+				arg_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
 				mut elements := []Value{cap: int(arg_count)}
 				for i := 0; i < int(arg_count); i++ {
 					elements << vm.peek(int(arg_count) - 1 - i)
@@ -287,10 +337,11 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				for _ in 0 .. int(arg_count) {
 					vm.pop()
 				}
-				vm.push(Value(ArrayValue{ elements: elements }))
+				vm.push(ArrayValue{ elements: elements })
 			}
 			.op_build_map {
-				pair_count := vm.read_byte(frame_idx)
+				pair_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
 				mut items := map[string]Value{}
 				for i := 0; i < int(pair_count); i++ {
 					val := vm.pop()
@@ -299,7 +350,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						items[key_val as string] = val
 					}
 				}
-				vm.push(Value(MapValue{ items: items }))
+				vm.push(MapValue{ items: items })
 			}
 			.op_index_get {
 				index := vm.pop()
@@ -310,8 +361,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						if idx >= 0 && idx < object.elements.len {
 							vm.push(object.elements[idx])
 						} else {
-							vm.runtime_error('Array index out of bounds')
-							return .runtime_error
+							vm.push(NilValue{})
 						}
 					} else {
 						vm.runtime_error('Array index must be a number')
@@ -320,13 +370,27 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				} else if object is MapValue {
 					if index is string {
 						key := index as string
-						vm.push(object.items[key] or { Value(NilValue{}) })
+						vm.push(object.items[key] or { NilValue{} })
 					} else {
 						vm.runtime_error('Map index must be a string')
 						return .runtime_error
 					}
+				} else if object is InstanceValue {
+					if index is string {
+						key := index as string
+						if key in object.fields {
+							vm.push(object.fields[key] or { NilValue{} })
+						} else if method := object.class.methods[key] {
+							vm.push(BoundMethodValue{ receiver: object, method: method })
+						} else {
+							vm.push(NilValue{})
+						}
+					} else {
+						vm.runtime_error('Property index must be a string')
+						return .runtime_error
+					}
 				} else {
-					vm.runtime_error('Can only index arrays or maps')
+					vm.runtime_error('Can only index arrays, maps or instances')
 					return .runtime_error
 				}
 			}
@@ -357,9 +421,88 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						vm.runtime_error('Map index must be a string')
 						return .runtime_error
 					}
+				} else if mut object is InstanceValue {
+					if index is string {
+						key := index as string
+						object.fields[key] = value
+						vm.push(value)
+					} else {
+						vm.runtime_error('Property index must be a string')
+						return .runtime_error
+					}
 				} else {
-					vm.runtime_error('Can only index arrays or maps')
+					vm.runtime_error('Can only index arrays, maps or instances')
 					return .runtime_error
+				}
+			}
+			.op_class {
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				if name is string {
+					vm.push(ClassValue{
+						name:    name
+						methods: map[string]ClosureValue{}
+					})
+				}
+			}
+			.op_method {
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name_val := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				if name_val is string {
+					name := name_val as string
+					method := vm.pop()
+					if method is ClosureValue {
+						mut klass := vm.peek(0)
+						if mut klass is ClassValue {
+							klass.methods[name] = method
+						}
+					}
+				}
+			}
+			.op_get_property {
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name_val := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				if name_val is string {
+					name := name_val as string
+					instance := vm.pop()
+					if instance is InstanceValue {
+						if name in instance.fields {
+							vm.push(instance.fields[name] or { NilValue{} })
+						} else {
+							if method := instance.class.methods[name] {
+								vm.push(BoundMethodValue{
+									receiver: instance
+									method:   method
+								})
+							} else {
+								vm.runtime_error('Undefined property "${name}"')
+								return .runtime_error
+							}
+						}
+					} else {
+						vm.runtime_error('Only instances have properties. Got ${vm.typeof(instance)}')
+						return .runtime_error
+					}
+				}
+			}
+			.op_set_property {
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name_val := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				if name_val is string {
+					name := name_val as string
+					value := vm.pop()
+					mut instance := vm.pop()
+					if mut instance is InstanceValue {
+						instance.fields[name] = value
+						vm.push(value)
+					} else {
+						vm.runtime_error('Only instances have fields')
+						return .runtime_error
+					}
 				}
 			}
 		}
@@ -402,7 +545,7 @@ fn (mut vm VM) close_upvalues(last_slot int) {
 fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 	match callee {
 		ClosureValue {
-			vm.call_closure(&callee, arg_count) or { return false }
+			vm.call_closure(callee, arg_count) or { return false }
 			return true
 		}
 		NativeFunctionValue {
@@ -418,7 +561,6 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 
 			result := callee.func(mut vm, args)
 
-			// Pop the function and arguments
 			for _ in 0 .. arg_count + 1 {
 				vm.pop()
 			}
@@ -427,21 +569,42 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			return true
 		}
 		FunctionValue {
-			mut closure := &ClosureValue{
-				function: &callee
+			closure := ClosureValue{
+				function: callee
 				upvalues: []&Upvalue{}
 			}
 			vm.call_closure(closure, arg_count) or { return false }
 			return true
 		}
+		ClassValue {
+			slot := vm.stack_top - arg_count - 1
+			vm.stack[slot] = InstanceValue{
+				class:  callee
+				fields: map[string]Value{}
+			}
+
+			if initializer := callee.methods['init'] {
+				vm.call_closure(initializer, arg_count) or { return false }
+				return true
+			} else if arg_count != 0 {
+				vm.runtime_error('Expected 0 arguments but got ${arg_count}')
+				return false
+			}
+			return true
+		}
+		BoundMethodValue {
+			vm.stack[vm.stack_top - arg_count - 1] = callee.receiver
+			vm.call_closure(callee.method, arg_count) or { return false }
+			return true
+		}
 		else {
-			vm.runtime_error('Can only call functions')
+			vm.runtime_error('Can only call functions and classes')
 			return false
 		}
 	}
 }
 
-fn (mut vm VM) call_closure(closure &ClosureValue, arg_count int) ! {
+fn (mut vm VM) call_closure(closure ClosureValue, arg_count int) ! {
 	if arg_count != closure.function.arity {
 		vm.runtime_error('Expected ${closure.function.arity} arguments but got ${arg_count}')
 		return error('Arity mismatch')
@@ -454,82 +617,50 @@ fn (mut vm VM) call_closure(closure &ClosureValue, arg_count int) ! {
 
 	mut frame := &vm.frames[vm.frame_count]
 	vm.frame_count++
-	unsafe {
-		frame.closure = closure
-	}
+	frame.closure = closure
 	frame.ip = 0
 	frame.slots = vm.stack_top - arg_count - 1
 }
 
-fn (mut vm VM) binary_op(op fn (f64, f64) f64) ! {
-	b := vm.pop()
-	a := vm.pop()
-	if a is f64 && b is f64 {
-		res := op(a, b)
-		vm.push(Value(res))
+fn (mut vm VM) push(val Value) {
+	if vm.stack_top >= stack_max {
+		vm.runtime_error('Stack overflow')
 		return
 	}
-	vm.runtime_error('Operands must be numbers')
-	return error('Type mismatch')
-}
-
-fn (mut vm VM) binary_op_bool(op fn (f64, f64) bool) ! {
-	b := vm.pop()
-	a := vm.pop()
-	if a is f64 && b is f64 {
-		res := op(a, b)
-		vm.push(Value(res))
-		return
-	}
-	vm.runtime_error('Operands must be numbers')
-	return error('Type mismatch')
-}
-
-@[inline]
-fn (mut vm VM) read_byte(frame_idx int) u8 {
-	mut frame := &vm.frames[frame_idx]
-	byte := frame.closure.function.chunk.code[frame.ip]
-	frame.ip++
-	return byte
-}
-
-@[inline]
-fn (mut vm VM) read_short(frame_idx int) u16 {
-	mut frame := &vm.frames[frame_idx]
-	high := u16(frame.closure.function.chunk.code[frame.ip])
-	low := u16(frame.closure.function.chunk.code[frame.ip + 1])
-	frame.ip += 2
-	return (high << 8) | low
-}
-
-@[inline]
-fn (mut vm VM) read_constant(frame_idx int) Value {
-	return vm.frames[frame_idx].closure.function.chunk.constants[vm.read_byte(frame_idx)]
-}
-
-@[inline]
-fn (mut vm VM) push(value Value) {
-	vm.stack[vm.stack_top] = value
+	vm.stack[vm.stack_top] = val
 	vm.stack_top++
 }
 
-@[inline]
 fn (mut vm VM) pop() Value {
 	vm.stack_top--
 	return vm.stack[vm.stack_top]
 }
 
-@[inline]
 fn (vm &VM) peek(distance int) Value {
 	return vm.stack[vm.stack_top - 1 - distance]
 }
 
 fn (mut vm VM) define_native(name string, arity int, func NativeFn) {
-	vm.globals[name] = Value(NativeFunctionValue{
+	vm.globals[name] = NativeFunctionValue{
 		name:  name
 		arity: arity
 		func:  func
-	})
+	}
+}
+
+fn (vm &VM) typeof(val Value) string {
+	return match val {
+		f64 { 'number' }
+		bool { 'boolean' }
+		string { 'string' }
+		NilValue { 'nil' }
+		FunctionValue, ClosureValue, NativeFunctionValue { 'function' }
+		ArrayValue { 'array' }
+		MapValue { 'map' }
+		ClassValue { 'class' }
+		InstanceValue { 'instance' }
+		BoundMethodValue { 'function' }
+	}
 }
 
 fn (vm &VM) runtime_error(message string) {

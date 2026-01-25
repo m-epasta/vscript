@@ -165,6 +165,8 @@ fn (mut s Scanner) identifier() {
 fn (s &Scanner) keyword_type(text string) TokenType {
 	return match text {
 		'fn' { .fn_keyword }
+		'class' { .class_keyword }
+		'this' { .this_keyword }
 		'if' { .if_keyword }
 		'else' { .else_keyword }
 		'while' { .while_keyword }
@@ -174,6 +176,8 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'true' { .true_keyword }
 		'false' { .false_keyword }
 		'var' { .var_keyword }
+		'print' { .print_keyword }
+		'println' { .println_keyword }
 		else { .identifier }
 	}
 }

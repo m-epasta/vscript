@@ -36,6 +36,8 @@ enum TokenType {
 
 	// Keywords
 	fn_keyword
+	class_keyword
+	this_keyword
 	if_keyword
 	else_keyword
 	while_keyword
@@ -45,6 +47,8 @@ enum TokenType {
 	true_keyword
 	false_keyword
 	var_keyword
+	print_keyword
+	println_keyword
 
 	// Special
 	eof

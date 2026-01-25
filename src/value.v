@@ -1,32 +1,42 @@
-// Value representation for vscript VM
+// Value types for vscript
 module main
 
-// Tagged union for runtime values - optimized for performance
-type Value = f64
-	| bool
-	| string
-	| NilValue
-	| FunctionValue
-	| ArrayValue
+type Value = ArrayValue
+	| BoundMethodValue
+	| ClassValue
 	| ClosureValue
-	| NativeFunctionValue
+	| FunctionValue
+	| InstanceValue
 	| MapValue
+	| NativeFunctionValue
+	| NilValue
+	| bool
+	| f64
+	| string
 
 struct NilValue {}
 
-type NativeFn = fn (mut vm VM, args []Value) Value
+struct FunctionValue {
+pub:
+	arity          int
+	upvalues_count int
+	chunk          &Chunk
+	name           string
+}
+
+struct ClosureValue {
+pub:
+	function FunctionValue
+mut:
+	upvalues []&Upvalue
+}
+
+type NativeFn = fn (mut VM, []Value) Value
 
 struct NativeFunctionValue {
 	name  string
 	arity int
 	func  NativeFn @[required]
-}
-
-struct FunctionValue {
-	arity          int
-	upvalues_count int
-	chunk          &Chunk
-	name           string
 }
 
 struct ArrayValue {
@@ -39,44 +49,55 @@ mut:
 	items map[string]Value
 }
 
+struct ClassValue {
+	name string
+mut:
+	methods map[string]ClosureValue
+}
+
+struct InstanceValue {
+	class ClassValue
+mut:
+	fields map[string]Value
+}
+
+struct BoundMethodValue {
+	receiver Value
+	method   ClosureValue
+}
+
 @[heap]
 struct Upvalue {
 mut:
-	value        &Value // Pointer to current value (stack or closed)
-	closed       Value  // Storage for value once closed
-	is_closed    bool
+	value     &Value
+	closed    Value
+	is_closed bool
+	// Index in the stack where the variable lives (while open)
 	location_idx int
 }
 
-@[heap]
-struct ClosureValue {
-	function &FunctionValue
-mut:
-	upvalues []&Upvalue
-}
-
 fn value_to_string(v Value) string {
-	return match v {
+	match v {
 		f64 {
-			v.str()
+			return v.str()
 		}
 		bool {
-			v.str()
+			return v.str()
 		}
 		string {
-			v
+			return v
 		}
 		NilValue {
-			'nil'
+			return 'nil'
 		}
 		FunctionValue {
-			'<fn ${v.name}>'
+			return '<fn ${v.name}>'
 		}
 		ClosureValue {
-			'<fn ${v.function.name}>'
+			return '<fn ${v.function.name}>'
 		}
 		NativeFunctionValue {
-			'<native fn ${v.name}>'
+			return '<native fn ${v.name}>'
 		}
 		ArrayValue {
 			mut res := '['
@@ -87,7 +108,7 @@ fn value_to_string(v Value) string {
 				}
 			}
 			res += ']'
-			res
+			return res
 		}
 		MapValue {
 			mut res := '{'
@@ -102,63 +123,74 @@ fn value_to_string(v Value) string {
 			res += '}'
 			return res
 		}
+		ClassValue {
+			return '<class ${v.name}>'
+		}
+		InstanceValue {
+			return '<instance of ${v.class.name}>'
+		}
+		BoundMethodValue {
+			return value_to_string(v.method)
+		}
 	}
 }
 
 fn values_equal(a Value, b Value) bool {
-	return match a {
+	match a {
+		NilValue {
+			return b is NilValue
+		}
 		f64 {
 			if b is f64 {
 				return a == b
 			}
-			false
 		}
 		bool {
 			if b is bool {
 				return a == b
 			}
-			false
 		}
 		string {
 			if b is string {
 				return a == b
 			}
-			false
 		}
-		NilValue {
-			return b is NilValue
+		ArrayValue {
+			return false
 		}
 		FunctionValue {
-			if b is FunctionValue {
-				return a.name == b.name && a.chunk == b.chunk
-			}
-			false
+			return false
 		}
 		ClosureValue {
-			if b is ClosureValue {
-				return a.function == b.function
-			}
-			false
+			return false
 		}
 		NativeFunctionValue {
 			if b is NativeFunctionValue {
-				return a.name == b.name && a.func == b.func
+				return a.name == b.name
 			}
-			false
-		}
-		ArrayValue {
-			false
 		}
 		MapValue {
-			false // For now, only reference equality if we had it; otherwise false
+			return false
+		}
+		ClassValue {
+			if b is ClassValue {
+				return a.name == b.name
+			}
+		}
+		InstanceValue {
+			return false
+		}
+		BoundMethodValue {
+			return false
 		}
 	}
+	return false
 }
 
 fn is_falsey(v Value) bool {
-	return match v {
-		NilValue { true }
-		bool { !v }
-		else { false }
+	match v {
+		NilValue { return true }
+		bool { return !v }
+		else { return false }
 	}
 }

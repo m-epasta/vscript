@@ -39,6 +39,9 @@ fn (mut p Parser) parse() ![]Stmt {
 }
 
 fn (mut p Parser) declaration() !Stmt {
+	if p.match_([.class_keyword]) {
+		return p.class_declaration()
+	}
 	if p.match_([.fn_keyword]) {
 		stmt := p.function()!
 		return stmt
@@ -93,6 +96,52 @@ fn (mut p Parser) function() !Stmt {
 	})
 }
 
+fn (mut p Parser) class_declaration() !Stmt {
+	name := p.consume(.identifier, 'Expect class name')!
+	p.consume(.left_brace, "Expect '{' before class body")!
+
+	mut methods := []FunctionStmt{}
+	for !p.check(.right_brace) && !p.is_at_end() {
+		for p.match_([.semicolon]) {}
+		if p.check(.right_brace) {
+			break
+		}
+		methods << p.method()!
+	}
+
+	p.consume(.right_brace, "Expect '}' after class body")!
+
+	return Stmt(ClassStmt{
+		name:    name
+		methods: methods
+	})
+}
+
+fn (mut p Parser) method() !FunctionStmt {
+	name := p.consume(.identifier, 'Expect method name')!
+	p.consume(.left_paren, "Expect '(' after method name")!
+
+	mut params := []Token{}
+	if !p.check(.right_paren) {
+		for {
+			params << p.consume(.identifier, 'Expect parameter name')!
+			if !p.match_([.comma]) {
+				break
+			}
+		}
+	}
+
+	p.consume(.right_paren, "Expect ')' after parameters")!
+	p.consume(.left_brace, "Expect '{' before method body")!
+	body := p.block()!
+
+	return FunctionStmt{
+		name:   name
+		params: params
+		body:   body
+	}
+}
+
 fn (mut p Parser) statement() !Stmt {
 	if p.match_([.for_keyword]) {
 		return p.for_statement()
@@ -106,6 +155,9 @@ fn (mut p Parser) statement() !Stmt {
 	if p.match_([.while_keyword]) {
 		return p.while_statement()
 	}
+	if p.match_([.print_keyword]) {
+		return p.print_statement()
+	}
 	if p.match_([.left_brace]) {
 		return Stmt(BlockStmt{
 			statements: p.block()!
@@ -113,6 +165,14 @@ fn (mut p Parser) statement() !Stmt {
 	}
 
 	return p.expression_statement()
+}
+
+fn (mut p Parser) print_statement() !Stmt {
+	value := p.expression()!
+	p.consume(.semicolon, 'Expect ; after value')!
+	return Stmt(PrintStmt{
+		expression: value
+	})
 }
 
 fn (mut p Parser) for_statement() !Stmt {
@@ -232,6 +292,12 @@ fn (mut p Parser) assignment() !Expr {
 			return Expr(AssignIndexExpr{
 				object: expr.object
 				index:  expr.index
+				value:  value
+			})
+		} else if expr is GetExpr {
+			return Expr(SetExpr{
+				object: expr.object
+				name:   expr.name
 				value:  value
 			})
 		}
@@ -357,6 +423,12 @@ fn (mut p Parser) call() !Expr {
 	for {
 		if p.match_([.left_paren]) {
 			expr = p.finish_call(expr)!
+		} else if p.match_([.dot]) {
+			name := p.consume(.identifier, "Expect property name after '.'")!
+			expr = Expr(GetExpr{
+				object: expr
+				name:   name
+			})
 		} else if p.match_([.left_bracket]) {
 			index := p.expression()!
 			p.consume(.right_bracket, 'Expect ] after index')!
@@ -424,6 +496,12 @@ fn (mut p Parser) primary() !Expr {
 	if p.match_([.identifier]) {
 		return Expr(VariableExpr{
 			name: p.previous()
+		})
+	}
+
+	if p.match_([.this_keyword]) {
+		return Expr(ThisExpr{
+			keyword: p.previous()
 		})
 	}
 

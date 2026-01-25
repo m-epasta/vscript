@@ -98,6 +98,9 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 						t.output.write_string(' = ')
 						t.visit_expr(initializer.initializer)
 					}
+					ExprStmt {
+						t.visit_expr(initializer.expression)
+					}
 					else {}
 				}
 			}
@@ -126,9 +129,53 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 			t.output.write_string(';\n')
 		}
 		BlockStmt {
+			t.indent()
+			t.output.write_string('{\n')
+			t.indent_level++
 			for s in stmt.statements {
 				t.visit_stmt(s)
 			}
+			t.indent_level--
+			t.indent()
+			t.output.write_string('}\n')
+		}
+		ClassStmt {
+			t.indent()
+			t.output.write_string('class ')
+			t.output.write_string(stmt.name.lexeme)
+			t.output.write_string(' {\n')
+			t.indent_level++
+
+			for method in stmt.methods {
+				t.indent()
+				name := if method.name.lexeme == 'init' { 'constructor' } else { method.name.lexeme }
+				t.output.write_string(name)
+				t.output.write_string('(')
+				for i, param in method.params {
+					if i > 0 {
+						t.output.write_string(', ')
+					}
+					t.output.write_string(param.lexeme)
+				}
+				t.output.write_string(') {\n')
+				t.indent_level++
+				for s in method.body {
+					t.visit_stmt(s)
+				}
+				t.indent_level--
+				t.indent()
+				t.output.write_string('}\n')
+			}
+
+			t.indent_level--
+			t.indent()
+			t.output.write_string('}\n')
+		}
+		PrintStmt {
+			t.indent()
+			t.output.write_string('console.log(')
+			t.visit_expr(stmt.expression)
+			t.output.write_string(');\n')
 		}
 	}
 }
@@ -136,23 +183,23 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 fn (mut t Transpiler) visit_expr(expr Expr) {
 	match expr {
 		BinaryExpr {
+			t.output.write_string('(')
 			t.visit_expr(expr.left)
-			t.output.write_string(' ')
-			t.output.write_string(expr.operator.lexeme)
-			t.output.write_string(' ')
+			t.output.write_string(' ${expr.operator.lexeme} ')
 			t.visit_expr(expr.right)
+			t.output.write_string(')')
 		}
 		UnaryExpr {
+			t.output.write_string('(')
 			t.output.write_string(expr.operator.lexeme)
 			t.visit_expr(expr.right)
+			t.output.write_string(')')
 		}
 		LiteralExpr {
 			if expr.type_ == .string {
 				t.output.write_string('"')
 				t.output.write_string(expr.value)
 				t.output.write_string('"')
-			} else if expr.type_ == .nil_keyword {
-				t.output.write_string('null')
 			} else {
 				t.output.write_string(expr.value)
 			}
@@ -171,16 +218,22 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.visit_expr(expr.value)
 		}
 		CallExpr {
-			// Special handling for built-in functions
+			// Handle built-ins
 			if expr.callee is VariableExpr {
-				if expr.callee.name.lexeme == 'println' {
-					t.output.write_string('console.log')
-				} else {
-					t.visit_expr(expr.callee)
+				if expr.callee.name.lexeme == 'println' || expr.callee.name.lexeme == 'print' {
+					t.output.write_string('console.log(')
+					for i, arg in expr.arguments {
+						if i > 0 {
+							t.output.write_string(', ')
+						}
+						t.visit_expr(arg)
+					}
+					t.output.write_string(')')
+					return
 				}
-			} else {
-				t.visit_expr(expr.callee)
 			}
+
+			t.visit_expr(expr.callee)
 			t.output.write_string('(')
 			for i, arg in expr.arguments {
 				if i > 0 {
@@ -199,6 +252,18 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 				t.visit_expr(element)
 			}
 			t.output.write_string(']')
+		}
+		MapExpr {
+			t.output.write_string('{')
+			for i in 0 .. expr.keys.len {
+				if i > 0 {
+					t.output.write_string(', ')
+				}
+				t.visit_expr(expr.keys[i])
+				t.output.write_string(': ')
+				t.visit_expr(expr.values[i])
+			}
+			t.output.write_string('}')
 		}
 		IndexExpr {
 			t.visit_expr(expr.object)
@@ -230,23 +295,26 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.indent()
 			t.output.write_string('}')
 		}
-		MapExpr {
-			t.output.write_string('{')
-			for i in 0 .. expr.keys.len {
-				t.visit_expr(expr.keys[i])
-				t.output.write_string(': ')
-				t.visit_expr(expr.values[i])
-				if i < expr.keys.len - 1 {
-					t.output.write_string(', ')
-				}
-			}
-			t.output.write_string('}')
+		GetExpr {
+			t.visit_expr(expr.object)
+			t.output.write_string('.')
+			t.output.write_string(expr.name.lexeme)
+		}
+		SetExpr {
+			t.visit_expr(expr.object)
+			t.output.write_string('.')
+			t.output.write_string(expr.name.lexeme)
+			t.output.write_string(' = ')
+			t.visit_expr(expr.value)
+		}
+		ThisExpr {
+			t.output.write_string('this')
 		}
 	}
 }
 
 fn (mut t Transpiler) indent() {
 	for _ in 0 .. t.indent_level {
-		t.output.write_string('    ')
+		t.output.write_string('  ')
 	}
 }
