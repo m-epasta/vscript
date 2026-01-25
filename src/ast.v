@@ -10,6 +10,7 @@ type Expr = BinaryExpr
 	| AssignExpr
 	| CallExpr
 	| ArrayExpr
+	| MapExpr
 	| IndexExpr
 	| AssignIndexExpr
 	| FunctionExpr
@@ -62,6 +63,11 @@ struct AssignIndexExpr {
 	object Expr
 	index  Expr
 	value  Expr
+}
+
+struct MapExpr {
+	keys   []Expr
+	values []Expr
 }
 
 struct FunctionExpr {

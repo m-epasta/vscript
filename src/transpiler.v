@@ -230,6 +230,18 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.indent()
 			t.output.write_string('}')
 		}
+		MapExpr {
+			t.output.write_string('{')
+			for i in 0 .. expr.keys.len {
+				t.visit_expr(expr.keys[i])
+				t.output.write_string(': ')
+				t.visit_expr(expr.values[i])
+				if i < expr.keys.len - 1 {
+					t.output.write_string(', ')
+				}
+			}
+			t.output.write_string('}')
+		}
 	}
 }
 

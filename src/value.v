@@ -10,6 +10,7 @@ type Value = f64
 	| ArrayValue
 	| ClosureValue
 	| NativeFunctionValue
+	| MapValue
 
 struct NilValue {}
 
@@ -31,6 +32,11 @@ struct FunctionValue {
 struct ArrayValue {
 mut:
 	elements []Value
+}
+
+struct MapValue {
+mut:
+	items map[string]Value
 }
 
 @[heap]
@@ -83,6 +89,19 @@ fn value_to_string(v Value) string {
 			res += ']'
 			res
 		}
+		MapValue {
+			mut res := '{'
+			mut count := 0
+			for k, val in v.items {
+				res += '"' + k + '": ' + value_to_string(val)
+				if count < v.items.len - 1 {
+					res += ', '
+				}
+				count++
+			}
+			res += '}'
+			return res
+		}
 	}
 }
 
@@ -128,7 +147,10 @@ fn values_equal(a Value, b Value) bool {
 			false
 		}
 		ArrayValue {
-			false // For now, simple inequality for arrays unless they are the same instance?
+			false
+		}
+		MapValue {
+			false // For now, only reference equality if we had it; otherwise false
 		}
 	}
 }

@@ -53,7 +53,8 @@ fn (c &Chunk) disassemble_instruction(offset int) int {
 		.op_close_upvalue, .op_return, .op_index_get, .op_index_set {
 			c.simple_instruction(instruction.str(), offset)
 		}
-		.op_get_local, .op_set_local, .op_call, .op_build_array, .op_get_upvalue, .op_set_upvalue {
+		.op_get_local, .op_set_local, .op_call, .op_build_array, .op_build_map, .op_get_upvalue,
+		.op_set_upvalue {
 			c.byte_instruction(instruction.str(), offset)
 		}
 		.op_get_global, .op_set_global {

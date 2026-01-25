@@ -43,6 +43,7 @@ enum OpCode {
 	op_build_array
 	op_index_get
 	op_index_set
+	op_build_map
 
 	// Closures
 	op_closure
@@ -81,6 +82,7 @@ fn (op OpCode) str() string {
 		.op_build_array { 'OP_BUILD_ARRAY' }
 		.op_index_get { 'OP_INDEX_GET' }
 		.op_index_set { 'OP_INDEX_SET' }
+		.op_build_map { 'OP_BUILD_MAP' }
 		.op_closure { 'OP_CLOSURE' }
 		.op_get_upvalue { 'OP_GET_UPVALUE' }
 		.op_set_upvalue { 'OP_SET_UPVALUE' }

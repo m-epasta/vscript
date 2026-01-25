@@ -280,6 +280,13 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 		FunctionExpr {
 			c.compile_function('(anonymous)', expr.params, expr.body, .type_function)!
 		}
+		MapExpr {
+			for i in 0 .. expr.keys.len {
+				c.compile_expr(expr.keys[i])!
+				c.compile_expr(expr.values[i])!
+			}
+			c.emit_bytes(u8(OpCode.op_build_map), u8(expr.keys.len))
+		}
 	}
 }
 

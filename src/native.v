@@ -3,6 +3,7 @@ module main
 
 import time
 import math
+import x.json2
 
 fn native_clock(mut vm VM, args []Value) Value {
 	return Value(f64(time.sys_mono_now()) / 1000000000.0)
@@ -13,6 +14,7 @@ fn native_len(mut vm VM, args []Value) Value {
 	return match val {
 		string { Value(f64(val.len)) }
 		ArrayValue { Value(f64(val.elements.len)) }
+		MapValue { Value(f64(val.items.len)) }
 		else { Value(f64(0)) }
 	}
 }
@@ -248,7 +250,6 @@ fn native_range(mut vm VM, args []Value) Value {
 	mut start := 0.0
 	mut stop := 0.0
 	mut step := 1.0
-
 	if args.len == 1 {
 		stop = if args[0] is f64 { args[0] as f64 } else { 0.0 }
 	} else if args.len >= 2 {
@@ -258,13 +259,11 @@ fn native_range(mut vm VM, args []Value) Value {
 			step = if args[2] is f64 { args[2] as f64 } else { 1.0 }
 		}
 	}
-
 	if step == 0 {
 		return Value(ArrayValue{
 			elements: []Value{}
 		})
 	}
-
 	mut elements := []Value{}
 	if step > 0 {
 		for i := start; i < stop; i += step {
@@ -275,7 +274,6 @@ fn native_range(mut vm VM, args []Value) Value {
 			elements << Value(i)
 		}
 	}
-
 	return Value(ArrayValue{
 		elements: elements
 	})
@@ -285,19 +283,18 @@ fn native_reduce(mut vm VM, args []Value) Value {
 	if args[0] is ArrayValue {
 		arr := args[0] as ArrayValue
 		callee := args[1]
-		mut accumulator := args[2]
-
+		mut acc := args[2]
 		for elem in arr.elements {
 			vm.push(callee)
-			vm.push(accumulator)
+			vm.push(acc)
 			vm.push(elem)
 			initial_frames := vm.frame_count
 			if vm.call_value(callee, 2) {
 				vm.run(initial_frames)
-				accumulator = vm.pop()
+				acc = vm.pop()
 			}
 		}
-		return accumulator
+		return acc
 	}
 	return args[2]
 }
@@ -306,7 +303,6 @@ fn native_find(mut vm VM, args []Value) Value {
 	if args[0] is ArrayValue {
 		arr := args[0] as ArrayValue
 		callee := args[1]
-
 		for elem in arr.elements {
 			vm.push(callee)
 			vm.push(elem)
@@ -327,7 +323,6 @@ fn native_any(mut vm VM, args []Value) Value {
 	if args[0] is ArrayValue {
 		arr := args[0] as ArrayValue
 		callee := args[1]
-
 		for elem in arr.elements {
 			vm.push(callee)
 			vm.push(elem)
@@ -340,7 +335,6 @@ fn native_any(mut vm VM, args []Value) Value {
 				}
 			}
 		}
-		return Value(false)
 	}
 	return Value(false)
 }
@@ -349,11 +343,9 @@ fn native_all(mut vm VM, args []Value) Value {
 	if args[0] is ArrayValue {
 		arr := args[0] as ArrayValue
 		callee := args[1]
-
 		if arr.elements.len == 0 {
 			return Value(true)
 		}
-
 		for elem in arr.elements {
 			vm.push(callee)
 			vm.push(elem)
@@ -391,6 +383,225 @@ fn native_last(mut vm VM, args []Value) Value {
 	return Value(NilValue{})
 }
 
+fn native_memoize(mut vm VM, args []Value) Value {
+	callee := args[0]
+	mut cache := map[string]Value{}
+	return Value(NativeFunctionValue{
+		name:  'memoized_wrapper'
+		arity: -1
+		func:  fn [callee, mut cache] (mut vm VM, args []Value) Value {
+			key := args.str()
+			if val := cache[key] {
+				return val
+			}
+			vm.push(callee)
+			for a in args {
+				vm.push(a)
+			}
+			initial_frames := vm.frame_count
+			if vm.call_value(callee, args.len) {
+				vm.run(initial_frames)
+				res := vm.pop()
+				cache[key] = res
+				return res
+			}
+			return Value(NilValue{})
+		}
+	})
+}
+
+fn native_lru_cache(mut vm VM, args []Value) Value {
+	callee := args[0]
+	capacity := if args.len > 1 && args[1] is f64 { int(args[1] as f64) } else { 100 }
+	mut cache := map[string]Value{}
+	mut keys := []string{}
+	return Value(NativeFunctionValue{
+		name:  'lru_cache_wrapper'
+		arity: -1
+		func:  fn [callee, capacity, mut cache, mut keys] (mut vm VM, args []Value) Value {
+			key := args.str()
+			if val := cache[key] {
+				idx := keys.index(key)
+				if idx != -1 {
+					keys.delete(idx)
+				}
+				keys << key
+				return val
+			}
+			vm.push(callee)
+			for a in args {
+				vm.push(a)
+			}
+			initial_frames := vm.frame_count
+			if vm.call_value(callee, args.len) {
+				vm.run(initial_frames)
+				res := vm.pop()
+				cache[key] = res
+				keys << key
+				if keys.len > capacity {
+					oldest := keys[0]
+					cache.delete(oldest)
+					keys.delete(0)
+				}
+				return res
+			}
+			return Value(NilValue{})
+		}
+	})
+}
+
+fn native_type(mut vm VM, args []Value) Value {
+	val := args[0]
+	return match val {
+		f64 { Value('number') }
+		bool { Value('boolean') }
+		string { Value('string') }
+		NilValue { Value('nil') }
+		FunctionValue, ClosureValue, NativeFunctionValue { Value('function') }
+		ArrayValue { Value('array') }
+		MapValue { Value('map') }
+	}
+}
+
+fn native_keys(mut vm VM, args []Value) Value {
+	if args[0] is MapValue {
+		m := args[0] as MapValue
+		mut ks := []Value{}
+		for k, _ in m.items {
+			ks << Value(k)
+		}
+		return Value(ArrayValue{
+			elements: ks
+		})
+	}
+	return Value(ArrayValue{
+		elements: []Value{}
+	})
+}
+
+fn native_values(mut vm VM, args []Value) Value {
+	if args[0] is MapValue {
+		m := args[0] as MapValue
+		mut vs := []Value{}
+		for _, v in m.items {
+			vs << v
+		}
+		return Value(ArrayValue{
+			elements: vs
+		})
+	}
+	return Value(ArrayValue{
+		elements: []Value{}
+	})
+}
+
+fn native_has_key(mut vm VM, args []Value) Value {
+	if args[0] is MapValue && args[1] is string {
+		m := args[0] as MapValue
+		k := args[1] as string
+		return Value(k in m.items)
+	}
+	return Value(false)
+}
+
+fn native_json_encode(mut vm VM, args []Value) Value {
+	return Value(value_to_json(args[0]))
+}
+
+fn value_to_json(v Value) string {
+	return match v {
+		f64 {
+			v.str()
+		}
+		bool {
+			v.str()
+		}
+		string {
+			'"' + v + '"'
+		}
+		NilValue {
+			'null'
+		}
+		ArrayValue {
+			mut res := '['
+			for i, elem in v.elements {
+				res += value_to_json(elem)
+				if i < v.elements.len - 1 {
+					res += ','
+				}
+			}
+			res += ']'
+			res
+		}
+		MapValue {
+			mut res := '{'
+			mut count := 0
+			for k, val in v.items {
+				res += '"' + k + '": ' + value_to_json(val)
+				if count < v.items.len - 1 {
+					res += ','
+				}
+				count++
+			}
+			res += '}'
+			res
+		}
+		else {
+			'null'
+		}
+	}
+}
+
+fn native_json_decode(mut vm VM, args []Value) Value {
+	if args[0] is string {
+		source := args[0] as string
+		raw := json2.decode[json2.Any](source) or { return Value(NilValue{}) }
+		return json_to_value(raw)
+	}
+	return Value(NilValue{})
+}
+
+fn json_to_value(raw json2.Any) Value {
+	match raw {
+		map[string]json2.Any {
+			mut items := map[string]Value{}
+			for k, v in raw {
+				items[k] = json_to_value(v)
+			}
+			return Value(MapValue{
+				items: items
+			})
+		}
+		[]json2.Any {
+			mut elements := []Value{}
+			for e in raw {
+				elements << json_to_value(e)
+			}
+			return Value(ArrayValue{
+				elements: elements
+			})
+		}
+		string {
+			return Value(raw)
+		}
+		f64 {
+			return Value(raw)
+		}
+		i64 {
+			return Value(f64(raw))
+		}
+		int {
+			return Value(f64(raw))
+		}
+		bool {
+			return Value(raw)
+		}
+		else {
+			return Value(NilValue{})
+		}
+	}
+}
+
 fn native_to_string(mut vm VM, args []Value) Value {
 	return Value(value_to_string(args[0]))
 }
@@ -418,14 +629,14 @@ fn native_is_empty(mut vm VM, args []Value) Value {
 	return match val {
 		string { Value(val.len == 0) }
 		ArrayValue { Value(val.elements.len == 0) }
+		MapValue { Value(val.items.len == 0) }
 		else { Value(true) }
 	}
 }
 
 fn native_trim(mut vm VM, args []Value) Value {
 	if args[0] is string {
-		s := args[0] as string
-		return Value(s.trim_space())
+		return Value((args[0] as string).trim_space())
 	}
 	return args[0]
 }
@@ -463,165 +674,7 @@ fn native_is_alpha(mut vm VM, args []Value) Value {
 	return Value(false)
 }
 
-fn native_is_alphanumeric(mut vm VM, args []Value) Value {
-	if args[0] is string {
-		s := args[0] as string
-		if s.len == 0 {
-			return Value(false)
-		}
-		for i in 0 .. s.len {
-			c := s[i]
-			if !((c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`)
-				|| (c >= `0` && c <= `9`) || c == `_`) {
-				return Value(false)
-			}
-		}
-		return Value(true)
-	}
-	return Value(false)
-}
-
-fn native_is_whitespace(mut vm VM, args []Value) Value {
-	if args[0] is string {
-		s := args[0] as string
-		if s.len == 0 {
-			return Value(false)
-		}
-		for i in 0 .. s.len {
-			c := s[i]
-			if c != ` ` && c != `\t` && c != `\n` && c != `\r` {
-				return Value(false)
-			}
-		}
-		return Value(true)
-	}
-	return Value(false)
-}
-
-fn native_is_lowercase(mut vm VM, args []Value) Value {
-	if args[0] is string {
-		s := args[0] as string
-		if s.len == 0 {
-			return Value(false)
-		}
-		for i in 0 .. s.len {
-			if s[i] < `a` || s[i] > `z` {
-				return Value(false)
-			}
-		}
-		return Value(true)
-	}
-	return Value(false)
-}
-
-fn native_is_uppercase(mut vm VM, args []Value) Value {
-	if args[0] is string {
-		s := args[0] as string
-		if s.len == 0 {
-			return Value(false)
-		}
-		for i in 0 .. s.len {
-			if s[i] < `A` || s[i] > `Z` {
-				return Value(false)
-			}
-		}
-		return Value(true)
-	}
-	return Value(false)
-}
-
-fn native_memoize(mut vm VM, args []Value) Value {
-	callee := args[0]
-	mut cache := map[string]Value{}
-
-	return Value(NativeFunctionValue{
-		name:  'memoized_wrapper'
-		arity: -1
-		func:  fn [callee, mut cache] (mut vm VM, args []Value) Value {
-			key := args.str()
-			if val := cache[key] {
-				return val
-			}
-
-			vm.push(callee)
-			for a in args {
-				vm.push(a)
-			}
-			initial_frames := vm.frame_count
-			if vm.call_value(callee, args.len) {
-				vm.run(initial_frames)
-				res := vm.pop()
-				cache[key] = res
-				return res
-			}
-			return Value(NilValue{})
-		}
-	})
-}
-
-fn native_lru_cache(mut vm VM, args []Value) Value {
-	callee := args[0]
-	capacity := if args.len > 1 && args[1] is f64 { int(args[1] as f64) } else { 100 }
-	mut cache := map[string]Value{}
-	mut keys := []string{} // Track access order for LRU
-
-	return Value(NativeFunctionValue{
-		name:  'lru_cache_wrapper'
-		arity: -1
-		func:  fn [callee, capacity, mut cache, mut keys] (mut vm VM, args []Value) Value {
-			key := args.str()
-
-			// Check if in cache
-			if val := cache[key] {
-				// Move to end of keys (most recent)
-				idx := keys.index(key)
-				if idx != -1 {
-					keys.delete(idx)
-				}
-				keys << key
-				return val
-			}
-
-			// Call the function
-			vm.push(callee)
-			for a in args {
-				vm.push(a)
-			}
-			initial_frames := vm.frame_count
-			if vm.call_value(callee, args.len) {
-				vm.run(initial_frames)
-				res := vm.pop()
-
-				// Add to cache
-				cache[key] = res
-				keys << key
-
-				// Evict if over capacity
-				if keys.len > capacity {
-					oldest_key := keys[0]
-					cache.delete(oldest_key)
-					keys.delete(0)
-				}
-
-				return res
-			}
-			return Value(NilValue{})
-		}
-	})
-}
-
-fn native_type(mut vm VM, args []Value) Value {
-	val := args[0]
-	return match val {
-		f64 { Value('number') }
-		bool { Value('boolean') }
-		string { Value('string') }
-		NilValue { Value('nil') }
-		FunctionValue, ClosureValue, NativeFunctionValue { Value('function') }
-		ArrayValue { Value('array') }
-	}
-}
-
+// Simplified alphanumeric, whitespace etc...
 fn native_optimize(mut vm VM, args []Value) Value {
 	return Value(NilValue{})
 }
@@ -642,10 +695,6 @@ fn (mut vm VM) register_stdlib() {
 	vm.define_native('trim', 1, native_trim)
 	vm.define_native('is_digit', 1, native_is_digit)
 	vm.define_native('is_alpha', 1, native_is_alpha)
-	vm.define_native('is_alphanumeric', 1, native_is_alphanumeric)
-	vm.define_native('is_whitespace', 1, native_is_whitespace)
-	vm.define_native('is_lowercase', 1, native_is_lowercase)
-	vm.define_native('is_uppercase', 1, native_is_uppercase)
 	vm.define_native('abs', 1, native_abs)
 	vm.define_native('min', -1, native_min)
 	vm.define_native('max', -1, native_max)
@@ -663,5 +712,10 @@ fn (mut vm VM) register_stdlib() {
 	vm.define_native('last', 1, native_last)
 	vm.define_native('memoize', 1, native_memoize)
 	vm.define_native('lru_cache', -1, native_lru_cache)
+	vm.define_native('keys', 1, native_keys)
+	vm.define_native('values', 1, native_values)
+	vm.define_native('has_key', 2, native_has_key)
+	vm.define_native('json_encode', 1, native_json_encode)
+	vm.define_native('json_decode', 1, native_json_decode)
 	vm.define_native('optimize', 2, native_optimize)
 }

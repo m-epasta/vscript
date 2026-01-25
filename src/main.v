@@ -66,8 +66,14 @@ fn run_string(source string) {
 	result := vm.interpret(source)
 
 	match result {
-		.compile_error { exit(65) }
-		.runtime_error { exit(70) }
+		.compile_error {
+			eprintln('Compilation error')
+			exit(65)
+		}
+		.runtime_error {
+			eprintln('Runtime error')
+			exit(70)
+		}
 		.ok {}
 	}
 }

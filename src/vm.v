@@ -69,7 +69,10 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 	tokens := scanner.scan_tokens()
 
 	mut parser := new_parser(tokens)
-	stmts := parser.parse() or { return .compile_error }
+	stmts := parser.parse() or {
+		eprintln('Parse error: ${err}')
+		return .compile_error
+	}
 
 	mut compiler := new_compiler(none, .type_script)
 	mut function := compiler.compile(stmts) or { return .compile_error }
@@ -286,6 +289,18 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				}
 				vm.push(Value(ArrayValue{ elements: elements }))
 			}
+			.op_build_map {
+				pair_count := vm.read_byte(frame_idx)
+				mut items := map[string]Value{}
+				for i := 0; i < int(pair_count); i++ {
+					val := vm.pop()
+					key_val := vm.pop()
+					if key_val is string {
+						items[key_val as string] = val
+					}
+				}
+				vm.push(Value(MapValue{ items: items }))
+			}
 			.op_index_get {
 				index := vm.pop()
 				object := vm.pop()
@@ -302,8 +317,16 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						vm.runtime_error('Array index must be a number')
 						return .runtime_error
 					}
+				} else if object is MapValue {
+					if index is string {
+						key := index as string
+						vm.push(object.items[key] or { Value(NilValue{}) })
+					} else {
+						vm.runtime_error('Map index must be a string')
+						return .runtime_error
+					}
 				} else {
-					vm.runtime_error('Can only index arrays')
+					vm.runtime_error('Can only index arrays or maps')
 					return .runtime_error
 				}
 			}
@@ -325,8 +348,17 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						vm.runtime_error('Array index must be a number')
 						return .runtime_error
 					}
+				} else if mut object is MapValue {
+					if index is string {
+						key := index as string
+						object.items[key] = value
+						vm.push(value)
+					} else {
+						vm.runtime_error('Map index must be a string')
+						return .runtime_error
+					}
 				} else {
-					vm.runtime_error('Can only index arrays')
+					vm.runtime_error('Can only index arrays or maps')
 					return .runtime_error
 				}
 			}

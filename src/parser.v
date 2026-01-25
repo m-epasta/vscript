@@ -39,7 +39,6 @@ fn (mut p Parser) parse() ![]Stmt {
 }
 
 fn (mut p Parser) declaration() !Stmt {
-	// println('Declaration check: ${p.peek().type_}')
 	if p.match_([.fn_keyword]) {
 		stmt := p.function()!
 		return stmt
@@ -437,23 +436,11 @@ fn (mut p Parser) primary() !Expr {
 	}
 
 	if p.match_([.left_bracket]) {
-		mut elements := []Expr{}
-		if !p.check(.right_bracket) {
-			for {
-				elements << p.expression()!
-				if !p.match_([.comma]) {
-					break
-				}
-			}
-		}
-		p.consume(.right_bracket, 'Expect ] after array elements')!
-		return Expr(ArrayExpr{
-			elements: elements
-		})
+		return p.array()
 	}
 
-	if p.match_([.left_bracket]) {
-		return p.array()
+	if p.match_([.left_brace]) {
+		return p.map_literal()
 	}
 
 	if p.match_([.fn_keyword]) {
@@ -461,6 +448,50 @@ fn (mut p Parser) primary() !Expr {
 	}
 
 	return error('Expect expression')
+}
+
+fn (mut p Parser) map_literal() !Expr {
+	mut keys := []Expr{}
+	mut values := []Expr{}
+
+	if !p.check(.right_brace) {
+		for {
+			// Skip ASI semicolons inside map
+			for p.match_([.semicolon]) {}
+			if p.check(.right_brace) {
+				break
+			}
+
+			mut key := p.expression()!
+
+			// Map keys logic: convert identifiers to strings
+			if key is VariableExpr {
+				key = Expr(LiteralExpr{
+					value: (key as VariableExpr).name.lexeme
+					type_: .string
+				})
+			}
+
+			p.consume(.colon, "Expect ':' after map key")!
+			value := p.expression()!
+
+			keys << key
+			values << value
+
+			if !p.match_([.comma]) {
+				break
+			}
+			// Skip ASI semicolons after comma
+			for p.match_([.semicolon]) {}
+		}
+	}
+
+	for p.match_([.semicolon]) {}
+	p.consume(.right_brace, "Expect '}' after map literal")!
+	return Expr(MapExpr{
+		keys:   keys
+		values: values
+	})
 }
 
 fn (mut p Parser) anonymous_function() !Expr {
@@ -490,12 +521,21 @@ fn (mut p Parser) array() !Expr {
 	mut elements := []Expr{}
 	if !p.check(.right_bracket) {
 		for {
+			// Skip ASI semicolons inside array
+			for p.match_([.semicolon]) {}
+			if p.check(.right_bracket) {
+				break
+			}
+
 			elements << p.expression()!
 			if !p.match_([.comma]) {
 				break
 			}
+			// Skip ASI semicolons after comma
+			for p.match_([.semicolon]) {}
 		}
 	}
+	for p.match_([.semicolon]) {}
 	p.consume(.right_bracket, 'Expect ] after array elements')!
 	return Expr(ArrayExpr{
 		elements: elements
