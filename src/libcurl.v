@@ -16,6 +16,19 @@ fn C.curl_easy_perform(handle &C.CURL) int
 fn C.curl_easy_cleanup(handle &C.CURL)
 fn C.curl_easy_getinfo(handle &C.CURL, info int, parameter voidptr) int
 
+// WebSocket API (Curl 7.86+)
+struct C.curl_ws_frame {
+	age       int
+	flags     int
+	offset    i64
+	bytesleft i64
+	len       usize
+}
+
+fn C.curl_ws_recv(handle &C.CURL, buffer voidptr, buflen usize, recv &usize, meta &&C.curl_ws_frame) int
+fn C.curl_ws_send(handle &C.CURL, buffer voidptr, buflen usize, send &usize, fragsize i64, flags int) int
+fn C.curl_ws_meta(handle &C.CURL) &C.curl_ws_frame
+
 type CurlHeaderFn = fn (&char, usize, usize, voidptr) usize
 
 fn C.curl_multi_init() &C.CURLM
@@ -53,6 +66,14 @@ const curl_http_version_3only = 5
 const curlm_ok = 0
 const curlmsg_done = 1
 const curl_pipewait = 1
+
+// WebSocket constants
+const curlws_text = 1
+const curlws_binary = 2
+const curlws_cont = 4
+const curlws_close = 8
+const curlws_ping = 16
+const curlws_pong = 32
 
 // Share constants
 const curlopt_share = 10100

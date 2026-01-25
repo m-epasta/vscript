@@ -13,6 +13,7 @@ type Value = ArrayValue
 	| NativeFunctionValue
 	| NilValue
 	| PromiseValue
+	| SocketValue
 	| StreamValue
 	| StructInstanceValue
 	| StructValue
@@ -21,6 +22,13 @@ type Value = ArrayValue
 	| string
 
 struct NilValue {}
+
+@[heap]
+struct SocketValue {
+pub:
+	handle   voidptr
+	messages chan string
+}
 
 @[heap]
 struct StreamValue {
@@ -160,6 +168,9 @@ fn value_to_string(v Value) string {
 		NativeFunctionValue {
 			return '<native fn ${v.name}>'
 		}
+		SocketValue {
+			return '<Socket>'
+		}
 		ArrayValue {
 			mut res := '['
 			for i, elem in v.elements {
@@ -232,6 +243,11 @@ fn values_equal(a Value, b Value) bool {
 		string {
 			if b is string {
 				return a == b
+			}
+		}
+		SocketValue {
+			if b is SocketValue {
+				return a.handle == b.handle
 			}
 		}
 		EnumVariantValue {

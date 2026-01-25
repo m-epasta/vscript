@@ -51,6 +51,7 @@ mut:
 	transfer_bodies        map[voidptr]&string     // easy_handle -> buffer pointer (on heap)
 	stream_queues          map[voidptr]chan string // easy_handle -> chunk channel
 	stream_headers_done    map[voidptr]bool        // easy_handle -> bool
+	ws_queues              map[voidptr]chan string // easy_handle -> msg channel
 	curl_share_handle      &C.CURLSH
 }
 
@@ -97,6 +98,7 @@ fn new_vm() VM {
 			transfer_bodies:     map[voidptr]&string{}
 			stream_queues:       map[voidptr]chan string{}
 			stream_headers_done: map[voidptr]bool{}
+			ws_queues:           map[voidptr]chan string{}
 			curl_share_handle:   C.curl_share_init()
 		}
 
@@ -120,15 +122,46 @@ fn (mut vm VM) poll_curl_multi() {
 	C.curl_multi_poll(vm.curl_multi_handle, 0, 0, 1, &still_running)
 	C.curl_multi_perform(vm.curl_multi_handle, &still_running)
 
-	// Phase 1: Early Resolution for Streaming
+	// Phase 1: Early Resolution (Streaming or WebSocket Handshake)
 	for handle, id in vm.active_transfers {
-		if q := vm.stream_queues[handle] {
-			if vm.stream_headers_done[handle] {
-				if mut state := vm.promises[id] {
-					if state.status == .pending {
-						mut status := 0
-						C.curl_easy_getinfo(handle, 2097154, &status)
+		if vm.stream_headers_done[handle] {
+			if mut state := vm.promises[id] {
+				if state.status == .pending {
+					mut status := 0
+					C.curl_easy_getinfo(handle, 2097154, &status)
 
+					// Detect WebSocket via status 101 or protocol
+					if status == 101 {
+						msg_chan := chan string{cap: 100}
+						vm.ws_queues[handle] = msg_chan
+
+						sock_obj := SocketValue{
+							handle:   handle
+							messages: msg_chan
+						}
+
+						mut sock_methods := map[string]Value{}
+						vm.define_native_in_map_with_context(mut sock_methods, 'send',
+							1, [Value(sock_obj)], native_socket_send)
+						vm.define_native_in_map_with_context(mut sock_methods, 'recv',
+							0, [Value(sock_obj)], native_socket_recv)
+						vm.define_native_in_map_with_context(mut sock_methods, 'close',
+							0, [Value(sock_obj)], native_socket_close)
+
+						state.value = Value(EnumVariantValue{
+							enum_name: 'Result'
+							variant:   'ok'
+							values:    [
+								Value(MapValue{
+									items: sock_methods
+								}),
+							]
+						})
+						state.status = .resolved
+						continue
+					}
+
+					if q := vm.stream_queues[handle] {
 						mut resp_map := map[string]Value{}
 						resp_map['status'] = Value(f64(status))
 						resp_map['ok'] = Value(status >= 200 && status < 300)
@@ -160,6 +193,34 @@ fn (mut vm VM) poll_curl_multi() {
 						state.status = .resolved
 					}
 				}
+			}
+		}
+	}
+
+	// Phase 1.5: Receive WebSocket Frames
+	for handle, q in vm.ws_queues {
+		// Attempt to receive frames
+		mut buffer := []u8{len: 4096}
+		mut received := usize(0)
+		mut meta := &C.curl_ws_frame(unsafe { nil })
+
+		for {
+			res := unsafe { C.curl_ws_recv(handle, buffer.data, 4096, &received, &meta) }
+			if res != 0 {
+				break
+			}
+			if received == 0 {
+				break
+			}
+
+			// Process frame
+			unsafe {
+				chunk := (&char(buffer.data)).vstring_with_len(int(received))
+				q <- chunk
+			}
+			// If no more data available immediately, stop internal loop
+			if unsafe { meta != 0 && meta.bytesleft == 0 } {
+				break
 			}
 		}
 	}
@@ -222,6 +283,9 @@ fn (mut vm VM) poll_curl_multi() {
 			if q := vm.stream_queues[easy_handle] {
 				q.close()
 			}
+			if q := vm.ws_queues[easy_handle] {
+				q.close()
+			}
 
 			// Cleanup
 			C.curl_multi_remove_handle(vm.curl_multi_handle, easy_handle)
@@ -229,6 +293,7 @@ fn (mut vm VM) poll_curl_multi() {
 			vm.active_transfers.delete(easy_handle)
 			vm.transfer_bodies.delete(easy_handle)
 			vm.stream_queues.delete(easy_handle)
+			vm.ws_queues.delete(easy_handle)
 			vm.stream_headers_done.delete(easy_handle)
 		}
 	}
@@ -265,6 +330,55 @@ fn native_stream_is_closed(mut vm VM, args []Value) Value {
 	stream := vm.current_native_context[0] as StreamValue
 	is_closed := stream.chunks.closed
 	return Value(is_closed)
+}
+
+fn native_socket_send(mut vm VM, args []Value) Value {
+	socket := vm.current_native_context[0] as SocketValue
+	data := value_to_string(args[0])
+
+	mut sent := usize(0)
+	// CURLWS_TEXT = 1
+	res := C.curl_ws_send(socket.handle, data.str, data.len, &sent, 0, 1)
+	return Value(res == 0)
+}
+
+fn native_socket_recv(mut vm VM, args []Value) Value {
+	socket := vm.current_native_context[0] as SocketValue
+	id := vm.next_promise_id
+	vm.next_promise_id++
+
+	state := &PromiseState{
+		status: .pending
+		value:  NilValue{}
+	}
+	vm.promises[id] = state
+
+	spawn fn (id int, msgs chan string, results_chan chan TaskResult) {
+		msg := <-msgs or {
+			results_chan <- TaskResult{
+				id:     id
+				result: Value(NilValue{})
+			}
+			return
+		}
+		results_chan <- TaskResult{
+			id:     id
+			result: Value(msg)
+		}
+	}(id, socket.messages, vm.task_results)
+
+	return Value(PromiseValue{
+		id: id
+	})
+}
+
+fn native_socket_close(mut vm VM, args []Value) Value {
+	socket := vm.current_native_context[0] as SocketValue
+	mut sent := usize(0)
+	// CURLWS_CLOSE = 8
+	C.curl_ws_send(socket.handle, 0, 0, &sent, 0, 8)
+	socket.messages.close()
+	return Value(true)
 }
 
 fn (mut vm VM) poll_tasks() {
@@ -1245,6 +1359,7 @@ fn (vm &VM) typeof(val Value) string {
 		EnumVariantValue { 'enum_variant' }
 		BoundMethodValue { 'function' }
 		PromiseValue { 'promise' }
+		SocketValue { 'socket' }
 		StreamValue { 'stream' }
 	}
 }
@@ -1291,6 +1406,10 @@ fn (mut vm VM) import_module(path string) !Value {
 	}
 	if path == 'core/http3.vs' {
 		val := create_http3_module(mut vm)
+		return val
+	}
+	if path == 'core/ws.vs' {
+		val := create_ws_module(mut vm)
 		return val
 	}
 

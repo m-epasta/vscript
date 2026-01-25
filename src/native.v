@@ -489,6 +489,7 @@ fn native_type(mut vm VM, args []Value) Value {
 		EnumVariantValue { Value('enum_variant') }
 		BoundMethodValue { Value('function') }
 		PromiseValue { Value('promise') }
+		SocketValue { Value('socket') }
 		StreamValue { Value('stream') }
 	}
 }
