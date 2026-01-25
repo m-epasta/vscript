@@ -39,17 +39,33 @@ fn (mut p Parser) parse() ![]Stmt {
 }
 
 fn (mut p Parser) declaration() !Stmt {
+	mut attributes := []Attribute{}
+	if p.match_([.at_bracket]) {
+		attributes = p.parse_attributes()!
+	}
+
 	if p.match_([.class_keyword]) {
-		return p.class_declaration()
+		return p.class_declaration(attributes)
 	}
 	if p.match_([.fn_keyword]) {
-		stmt := p.function()!
-		return stmt
+		return p.function(attributes)
+	}
+	if p.match_([.struct_keyword]) {
+		return p.struct_declaration(attributes)
+	}
+	if p.match_([.enum_keyword]) {
+		return p.enum_declaration(attributes)
 	}
 	if p.match_([.var_keyword]) {
+		if attributes.len > 0 {
+			return error('Cannot use attributes on variable declarations')
+		}
 		return p.var_declaration()
 	}
 
+	if attributes.len > 0 {
+		return error('Unexpected attributes before statement')
+	}
 	return p.statement()
 }
 
@@ -64,13 +80,14 @@ fn (mut p Parser) var_declaration() !Stmt {
 		initializer = p.expression()!
 	}
 
+	p.consume(.semicolon, 'Expect ; after variable declaration')!
 	return Stmt(VarStmt{
 		name:        name
 		initializer: initializer
 	})
 }
 
-fn (mut p Parser) function() !Stmt {
+fn (mut p Parser) function(attributes []Attribute) !Stmt {
 	name := p.consume(.identifier, 'Expect function name')!
 
 	p.consume(.left_paren, 'Expect ( after function name')!
@@ -90,13 +107,14 @@ fn (mut p Parser) function() !Stmt {
 	body := p.block()!
 
 	return Stmt(FunctionStmt{
-		name:   name
-		params: params
-		body:   body
+		name:       name
+		params:     params
+		body:       body
+		attributes: attributes
 	})
 }
 
-fn (mut p Parser) class_declaration() !Stmt {
+fn (mut p Parser) class_declaration(attributes []Attribute) !Stmt {
 	name := p.consume(.identifier, 'Expect class name')!
 	p.consume(.left_brace, "Expect '{' before class body")!
 
@@ -112,12 +130,88 @@ fn (mut p Parser) class_declaration() !Stmt {
 	p.consume(.right_brace, "Expect '}' after class body")!
 
 	return Stmt(ClassStmt{
-		name:    name
-		methods: methods
+		name:       name
+		methods:    methods
+		attributes: attributes
+	})
+}
+
+fn (mut p Parser) struct_declaration(attributes []Attribute) !Stmt {
+	name := p.consume(.identifier, 'Expect struct name')!
+	p.consume(.left_brace, "Expect '{' before struct body")!
+
+	mut fields := []StructField{}
+	for !p.check(.right_brace) && !p.is_at_end() {
+		for p.match_([.semicolon]) {}
+		if p.check(.right_brace) {
+			break
+		}
+
+		mut f_attrs := []Attribute{}
+		if p.match_([.at_bracket]) {
+			f_attrs = p.parse_attributes()!
+		}
+
+		f_name := p.consume(.identifier, 'Expect field name')!
+		f_type := p.consume(.identifier, 'Expect field type')!
+
+		mut initializer := ?Expr(none)
+		if p.match_([.equal]) {
+			initializer = p.expression()!
+		}
+
+		fields << StructField{
+			name:        f_name
+			type_name:   f_type
+			initializer: initializer
+			attributes:  f_attrs
+		}
+		p.match_([.semicolon])
+	}
+
+	p.consume(.right_brace, "Expect '}' after struct body")!
+
+	return Stmt(StructStmt{
+		name:       name
+		fields:     fields
+		attributes: attributes
+	})
+}
+
+fn (mut p Parser) enum_declaration(attributes []Attribute) !Stmt {
+	name := p.consume(.identifier, 'Expect enum name')!
+	p.consume(.left_brace, "Expect '{' before enum body")!
+
+	mut variants := []EnumVariant{}
+	for !p.check(.right_brace) && !p.is_at_end() {
+		for p.match_([.semicolon]) {}
+		if p.check(.right_brace) {
+			break
+		}
+
+		v_name := p.consume(.identifier, 'Expect variant name')!
+		variants << EnumVariant{
+			name: v_name
+		}
+		p.match_([.comma])
+		for p.match_([.semicolon]) {}
+	}
+
+	p.consume(.right_brace, "Expect '}' after enum body")!
+
+	return Stmt(EnumStmt{
+		name:       name
+		variants:   variants
+		attributes: attributes
 	})
 }
 
 fn (mut p Parser) method() !FunctionStmt {
+	mut attributes := []Attribute{}
+	if p.match_([.at_bracket]) {
+		attributes = p.parse_attributes()!
+	}
+
 	name := p.consume(.identifier, 'Expect method name')!
 	p.consume(.left_paren, "Expect '(' after method name")!
 
@@ -136,9 +230,10 @@ fn (mut p Parser) method() !FunctionStmt {
 	body := p.block()!
 
 	return FunctionStmt{
-		name:   name
-		params: params
-		body:   body
+		name:       name
+		params:     params
+		body:       body
+		attributes: attributes
 	}
 }
 
@@ -226,13 +321,11 @@ fn (mut p Parser) if_statement() !Stmt {
 fn (mut p Parser) return_statement() !Stmt {
 	keyword := p.previous()
 	mut value := ?Expr(none)
-
-	if !p.check(.semicolon) && !p.check(.right_brace) {
+	if !p.check(.semicolon) {
 		value = p.expression()!
 	}
 
-	p.match_([.semicolon])
-
+	p.consume(.semicolon, 'Expect ; after return value')!
 	return Stmt(ReturnStmt{
 		keyword: keyword
 		value:   value
@@ -251,26 +344,26 @@ fn (mut p Parser) while_statement() !Stmt {
 	})
 }
 
+fn (mut p Parser) expression_statement() !Stmt {
+	expr := p.expression()!
+	p.consume(.semicolon, 'Expect ; after expression')!
+	return Stmt(ExprStmt{
+		expression: expr
+	})
+}
+
 fn (mut p Parser) block() ![]Stmt {
 	mut statements := []Stmt{}
-
 	for !p.check(.right_brace) && !p.is_at_end() {
-		if p.match_([.semicolon]) {
-			continue
+		for p.match_([.semicolon]) {}
+		if p.check(.right_brace) {
+			break
 		}
 		statements << p.declaration()!
 	}
 
-	p.consume(.right_brace, 'Expect } after block')!
+	p.consume(.right_brace, "Expect '}' after block")!
 	return statements
-}
-
-fn (mut p Parser) expression_statement() !Stmt {
-	expr := p.expression()!
-	p.match_([.semicolon])
-	return Stmt(ExprStmt{
-		expression: expr
-	})
 }
 
 fn (mut p Parser) expression() !Expr {
@@ -283,26 +376,31 @@ fn (mut p Parser) assignment() !Expr {
 	if p.match_([.equal]) {
 		value := p.assignment()!
 
-		if expr is VariableExpr {
-			return Expr(AssignExpr{
-				name:  expr.name
-				value: value
-			})
-		} else if expr is IndexExpr {
-			return Expr(AssignIndexExpr{
-				object: expr.object
-				index:  expr.index
-				value:  value
-			})
-		} else if expr is GetExpr {
-			return Expr(SetExpr{
-				object: expr.object
-				name:   expr.name
-				value:  value
-			})
+		match expr {
+			VariableExpr {
+				return Expr(AssignExpr{
+					name:  expr.name
+					value: value
+				})
+			}
+			GetExpr {
+				return Expr(SetExpr{
+					object: expr.object
+					name:   expr.name
+					value:  value
+				})
+			}
+			IndexExpr {
+				return Expr(AssignIndexExpr{
+					object: expr.object
+					index:  expr.index
+					value:  value
+				})
+			}
+			else {
+				error('Invalid assignment target')
+			}
 		}
-
-		return error('Invalid assignment target')
 	}
 
 	return expr
@@ -311,15 +409,14 @@ fn (mut p Parser) assignment() !Expr {
 fn (mut p Parser) or_() !Expr {
 	mut expr := p.and_()!
 
-	for p.match_([.identifier]) && p.previous().lexeme == 'or' {
+	// TODO: logical or handling
+	/*
+	for p.match_([.or_keyword]) {
 		operator := p.previous()
 		right := p.and_()!
-		expr = Expr(BinaryExpr{
-			left:     expr
-			operator: operator
-			right:    right
-		})
+		expr = Expr(LogicalExpr{left: expr, operator: operator, right: right})
 	}
+	*/
 
 	return expr
 }
@@ -327,15 +424,14 @@ fn (mut p Parser) or_() !Expr {
 fn (mut p Parser) and_() !Expr {
 	mut expr := p.equality()!
 
-	for p.match_([.identifier]) && p.previous().lexeme == 'and' {
+	// TODO: logical and handling
+	/*
+	for p.match_([.and_keyword]) {
 		operator := p.previous()
 		right := p.equality()!
-		expr = Expr(BinaryExpr{
-			left:     expr
-			operator: operator
-			right:    right
-		})
+		expr = Expr(LogicalExpr{left: expr, operator: operator, right: right})
 	}
+	*/
 
 	return expr
 }
@@ -424,7 +520,7 @@ fn (mut p Parser) call() !Expr {
 		if p.match_([.left_paren]) {
 			expr = p.finish_call(expr)!
 		} else if p.match_([.dot]) {
-			name := p.consume(.identifier, "Expect property name after '.'")!
+			name := p.consume(.identifier, 'Expect property name after .')!
 			expr = Expr(GetExpr{
 				object: expr
 				name:   name
@@ -446,7 +542,6 @@ fn (mut p Parser) call() !Expr {
 
 fn (mut p Parser) finish_call(callee Expr) !Expr {
 	mut arguments := []Expr{}
-
 	if !p.check(.right_paren) {
 		for {
 			arguments << p.expression()!
@@ -486,22 +581,21 @@ fn (mut p Parser) primary() !Expr {
 	}
 
 	if p.match_([.number, .string]) {
-		prev := p.previous()
 		return Expr(LiteralExpr{
-			value: prev.literal
-			type_: prev.type_
-		})
-	}
-
-	if p.match_([.identifier]) {
-		return Expr(VariableExpr{
-			name: p.previous()
+			value: p.previous().literal
+			type_: p.previous().type_
 		})
 	}
 
 	if p.match_([.this_keyword]) {
 		return Expr(ThisExpr{
 			keyword: p.previous()
+		})
+	}
+
+	if p.match_([.identifier]) {
+		return Expr(VariableExpr{
+			name: p.previous()
 		})
 	}
 
@@ -514,7 +608,7 @@ fn (mut p Parser) primary() !Expr {
 	}
 
 	if p.match_([.left_bracket]) {
-		return p.array()
+		return p.array_literal()
 	}
 
 	if p.match_([.left_brace]) {
@@ -522,84 +616,33 @@ fn (mut p Parser) primary() !Expr {
 	}
 
 	if p.match_([.fn_keyword]) {
-		return p.anonymous_function()
+		p.consume(.left_paren, 'Expect ( after fn')!
+		mut params := []Token{}
+		if !p.check(.right_paren) {
+			for {
+				params << p.consume(.identifier, 'Expect parameter name')!
+				if !p.match_([.comma]) {
+					break
+				}
+			}
+		}
+		p.consume(.right_paren, 'Expect ) after parameters')!
+		p.consume(.left_brace, 'Expect { before function body')!
+		body := p.block()!
+		return Expr(FunctionExpr{
+			params:     params
+			body:       body
+			attributes: []Attribute{}
+		})
 	}
 
 	return error('Expect expression')
 }
 
-fn (mut p Parser) map_literal() !Expr {
-	mut keys := []Expr{}
-	mut values := []Expr{}
-
-	if !p.check(.right_brace) {
-		for {
-			// Skip ASI semicolons inside map
-			for p.match_([.semicolon]) {}
-			if p.check(.right_brace) {
-				break
-			}
-
-			mut key := p.expression()!
-
-			// Map keys logic: convert identifiers to strings
-			if key is VariableExpr {
-				key = Expr(LiteralExpr{
-					value: (key as VariableExpr).name.lexeme
-					type_: .string
-				})
-			}
-
-			p.consume(.colon, "Expect ':' after map key")!
-			value := p.expression()!
-
-			keys << key
-			values << value
-
-			if !p.match_([.comma]) {
-				break
-			}
-			// Skip ASI semicolons after comma
-			for p.match_([.semicolon]) {}
-		}
-	}
-
-	for p.match_([.semicolon]) {}
-	p.consume(.right_brace, "Expect '}' after map literal")!
-	return Expr(MapExpr{
-		keys:   keys
-		values: values
-	})
-}
-
-fn (mut p Parser) anonymous_function() !Expr {
-	p.consume(.left_paren, 'Expect ( after fn')!
-
-	mut params := []Token{}
-	if !p.check(.right_paren) {
-		for {
-			params << p.consume(.identifier, 'Expect parameter name')!
-			if !p.match_([.comma]) {
-				break
-			}
-		}
-	}
-
-	p.consume(.right_paren, 'Expect ) after parameters')!
-	p.consume(.left_brace, 'Expect { before function body')!
-	body := p.block()!
-
-	return Expr(FunctionExpr{
-		params: params
-		body:   body
-	})
-}
-
-fn (mut p Parser) array() !Expr {
+fn (mut p Parser) array_literal() !Expr {
 	mut elements := []Expr{}
 	if !p.check(.right_bracket) {
 		for {
-			// Skip ASI semicolons inside array
 			for p.match_([.semicolon]) {}
 			if p.check(.right_bracket) {
 				break
@@ -609,7 +652,6 @@ fn (mut p Parser) array() !Expr {
 			if !p.match_([.comma]) {
 				break
 			}
-			// Skip ASI semicolons after comma
 			for p.match_([.semicolon]) {}
 		}
 	}
@@ -618,6 +660,57 @@ fn (mut p Parser) array() !Expr {
 	return Expr(ArrayExpr{
 		elements: elements
 	})
+}
+
+fn (mut p Parser) map_literal() !Expr {
+	mut keys := []Expr{}
+	mut values := []Expr{}
+
+	if !p.check(.right_brace) {
+		for {
+			for p.match_([.semicolon]) {}
+			if p.check(.right_brace) {
+				break
+			}
+
+			keys << p.expression()!
+			p.consume(.colon, 'Expect : after key')!
+			values << p.expression()!
+
+			if !p.match_([.comma]) {
+				break
+			}
+			for p.match_([.semicolon]) {}
+		}
+	}
+	for p.match_([.semicolon]) {}
+	p.consume(.right_brace, 'Expect } after map elements')!
+	return Expr(MapExpr{
+		keys:   keys
+		values: values
+	})
+}
+
+fn (mut p Parser) parse_attributes() ![]Attribute {
+	mut attributes := []Attribute{}
+	if !p.check(.right_bracket) {
+		for {
+			name := p.consume(.identifier, 'Expect attribute name')!
+			mut val := ?Expr(none)
+			if p.match_([.colon]) {
+				val = p.expression()!
+			}
+			attributes << Attribute{
+				name:  name
+				value: val
+			}
+			if !p.match_([.comma]) {
+				break
+			}
+		}
+	}
+	p.consume(.right_bracket, "Expect ']' after attributes")!
+	return attributes
 }
 
 fn (mut p Parser) match_(types []TokenType) bool {

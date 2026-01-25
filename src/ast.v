@@ -1,6 +1,12 @@
 // AST node definitions for vscript
 module main
 
+// Attributes (Decorators) metadata
+struct Attribute {
+	name  Token
+	value ?Expr
+}
+
 // Expression types
 type Expr = BinaryExpr
 	| UnaryExpr
@@ -74,8 +80,9 @@ struct MapExpr {
 }
 
 struct FunctionExpr {
-	params []Token
-	body   []Stmt
+	params     []Token
+	body       []Stmt
+	attributes []Attribute
 }
 
 struct GetExpr {
@@ -104,6 +111,8 @@ type Stmt = ExprStmt
 	| BlockStmt
 	| ClassStmt
 	| PrintStmt
+	| StructStmt
+	| EnumStmt
 
 struct ExprStmt {
 	expression Expr
@@ -119,9 +128,10 @@ struct VarStmt {
 }
 
 struct FunctionStmt {
-	name   Token
-	params []Token
-	body   []Stmt
+	name       Token
+	params     []Token
+	body       []Stmt
+	attributes []Attribute
 }
 
 struct IfStmt {
@@ -152,6 +162,30 @@ struct BlockStmt {
 }
 
 struct ClassStmt {
-	name    Token
-	methods []FunctionStmt
+	name       Token
+	methods    []FunctionStmt
+	attributes []Attribute
+}
+
+struct StructStmt {
+	name       Token
+	fields     []StructField
+	attributes []Attribute
+}
+
+struct StructField {
+	name        Token
+	type_name   Token // static type
+	initializer ?Expr // optional default value
+	attributes  []Attribute
+}
+
+struct EnumStmt {
+	name       Token
+	variants   []EnumVariant
+	attributes []Attribute
+}
+
+struct EnumVariant {
+	name Token
 }

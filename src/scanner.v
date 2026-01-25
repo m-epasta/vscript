@@ -178,6 +178,8 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'var' { .var_keyword }
 		'print' { .print_keyword }
 		'println' { .println_keyword }
+		'struct' { .struct_keyword }
+		'enum' { .enum_keyword }
 		else { .identifier }
 	}
 }

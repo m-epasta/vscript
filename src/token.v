@@ -49,8 +49,11 @@ enum TokenType {
 	var_keyword
 	print_keyword
 	println_keyword
+	struct_keyword
+	enum_keyword
 
 	// Special
+	at_bracket // @[
 	eof
 	error
 }

@@ -177,6 +177,9 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 			t.visit_expr(stmt.expression)
 			t.output.write_string(');\n')
 		}
+		StructStmt, EnumStmt {
+			// TODO: Implement JS transpilation for static data
+		}
 	}
 }
 

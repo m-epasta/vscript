@@ -194,6 +194,9 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			c.compile_expr(stmt.expression)!
 			c.emit_byte(u8(OpCode.op_print))
 		}
+		StructStmt, EnumStmt {
+			// TODO: Implement static data compilation
+		}
 	}
 }
 
