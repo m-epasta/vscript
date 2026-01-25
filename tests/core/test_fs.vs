@@ -1,8 +1,9 @@
 @[test]
 fn test_fs_operations() {
     import core:fs;
+    import core:tmpfile;
 
-    var path = "test_fs_temp.txt";
+    var path = tmpfile.random_path();
     var content = "Hello, Filesystem!";
 
     // 1. Clean up potential leftover
