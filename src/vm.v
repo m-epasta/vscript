@@ -1,8 +1,7 @@
-// Light-speed Bytecode VM with Closure Support
-module main
-
 import math
 import os
+import time
+import x.json2
 
 const stack_max = 256
 
@@ -26,18 +25,27 @@ struct ExceptionHandler {
 	close_upvalues_idx int
 }
 
+struct TaskResult {
+	id     int
+	result Value
+}
+
 struct VM {
 mut:
-	frames             []CallFrame
-	frame_count        int
-	stack              []Value
-	stack_top          int
-	globals            map[string]Value
-	open_upvalues      []&Upvalue
-	is_test_mode       bool
-	exception_handlers []ExceptionHandler
-	recovering         bool
-	modules            map[string]Value
+	frames                 []CallFrame
+	frame_count            int
+	stack                  []Value
+	stack_top              int
+	globals                map[string]Value
+	open_upvalues          []&Upvalue
+	is_test_mode           bool
+	exception_handlers     []ExceptionHandler
+	recovering             bool
+	modules                map[string]Value
+	task_results           chan TaskResult
+	promises               map[int]&PromiseState
+	next_promise_id        int
+	current_native_context []Value
 }
 
 fn new_vm() VM {
@@ -77,9 +85,54 @@ fn new_vm() VM {
 			is_test_mode:       false
 			exception_handlers: []ExceptionHandler{cap: 16}
 			modules:            map[string]Value{}
+			task_results:       chan TaskResult{cap: 100}
 		}
 		vm.register_stdlib()
 		return vm
+	}
+}
+
+fn (mut vm VM) poll_tasks() {
+	for {
+		select {
+			res := <-vm.task_results {
+				if mut state := vm.promises[res.id] {
+					mut final_res := res.result
+					// If result is Result.ok with a Response map, attach helper
+					if final_res is EnumVariantValue {
+						ev := final_res as EnumVariantValue
+						if ev.variant == 'ok' && ev.values.len > 0 && ev.values[0] is MapValue {
+							mut map_val := ev.values[0] as MapValue
+							if body := map_val.items['body'] {
+								vm.define_native_in_map_with_context(mut map_val.items,
+									'json', 0, [body], fn (mut v VM, a []Value) Value {
+									body_str := value_to_string(v.current_native_context[0])
+									raw := json2.decode[json2.Any](body_str) or {
+										return Value(EnumVariantValue{
+											enum_name: 'Result'
+											variant:   'err'
+											values:    [
+												Value('Failed to parse JSON body'),
+											]
+										})
+									}
+									return Value(EnumVariantValue{
+										enum_name: 'Result'
+										variant:   'ok'
+										values:    [json_to_value(raw)]
+									})
+								})
+							}
+						}
+					}
+					state.value = final_res
+					state.status = .resolved
+				}
+			}
+			else {
+				break
+			}
+		}
 	}
 }
 
@@ -112,6 +165,7 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 
 fn (mut vm VM) run(target_frame_count int) InterpretResult {
 	for vm.frame_count > target_frame_count {
+		vm.poll_tasks()
 		vm.recovering = false
 		f_idx := vm.frame_count - 1
 
@@ -778,13 +832,17 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 			.op_await {
 				val := vm.pop()
 				if val is PromiseValue {
-					p := val as PromiseValue
-					if p.status == .pending {
-						// For now, in our single-threaded VM, await on native ops
-						// would just block or spin.
-						// In Phase 17 we can add real yielding.
+					p_val := val as PromiseValue
+					id := p_val.id
+					for {
+						state := vm.promises[id] or { break }
+						if state.status != .pending {
+							vm.push(state.value)
+							break
+						}
+						vm.poll_tasks()
+						time.sleep(10 * time.millisecond)
 					}
-					vm.push(p.value)
 				} else {
 					vm.push(val)
 				}
@@ -851,7 +909,14 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 				args << vm.peek(arg_count - 1 - i)
 			}
 
+			// Save old context and set new one
+			old_context := vm.current_native_context
+			vm.current_native_context = callee.context
+
 			result := callee.func(mut vm, args)
+
+			// Restore context
+			vm.current_native_context = old_context
 
 			if vm.recovering {
 				return true
@@ -980,9 +1045,10 @@ fn (vm &VM) peek(distance int) Value {
 
 fn (mut vm VM) define_native(name string, arity int, func NativeFn) {
 	vm.globals[name] = NativeFunctionValue{
-		name:  name
-		arity: arity
-		func:  func
+		name:    name
+		arity:   arity
+		func:    func
+		context: []Value{}
 	}
 }
 
@@ -1110,6 +1176,24 @@ fn (mut vm VM) import_module(path string) !Value {
 			vm.globals = old_globals.clone()
 			return error('Runtime execution failed in module ${path}')
 		}
+	}
+}
+
+fn (mut vm VM) define_native_in_map(mut items map[string]Value, name string, arity int, func NativeFn) {
+	items[name] = NativeFunctionValue{
+		name:    name
+		arity:   arity
+		func:    func
+		context: []Value{}
+	}
+}
+
+fn (mut vm VM) define_native_in_map_with_context(mut items map[string]Value, name string, arity int, context []Value, func NativeFn) {
+	items[name] = NativeFunctionValue{
+		name:    name
+		arity:   arity
+		func:    func
+		context: context
 	}
 }
 

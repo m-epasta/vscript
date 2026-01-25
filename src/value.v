@@ -41,9 +41,10 @@ mut:
 type NativeFn = fn (mut VM, []Value) Value
 
 struct NativeFunctionValue {
-	name  string
-	arity int
-	func  NativeFn @[required]
+	name    string
+	arity   int
+	func    NativeFn @[required]
+	context []Value
 }
 
 struct ArrayValue {
@@ -105,12 +106,16 @@ enum PromiseStatus {
 	rejected
 }
 
-struct PromiseValue {
+@[heap]
+struct PromiseState {
 pub mut:
 	status PromiseStatus
 	value  Value
-	// Callback or list of waiters?
-	// For simplicity in single-threaded VM, maybe just state is enough for now.
+}
+
+struct PromiseValue {
+pub mut:
+	id int
 }
 
 @[heap]
@@ -192,7 +197,7 @@ fn value_to_string(v Value) string {
 			return value_to_string(v.method)
 		}
 		PromiseValue {
-			return '<Promise [${v.status}]>'
+			return '<Promise id=${v.id}>'
 		}
 	}
 }

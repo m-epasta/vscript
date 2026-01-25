@@ -93,12 +93,3 @@ fn create_fs_module(mut vm VM) Value {
 		items: exports
 	})
 }
-
-// Helper to define natives directly into a map (for modules)
-fn (mut vm VM) define_native_in_map(mut m map[string]Value, name string, arity int, func NativeFn) {
-	m[name] = Value(NativeFunctionValue{
-		name:  name
-		arity: arity
-		func:  func
-	})
-}
