@@ -26,4 +26,14 @@ meta_func();
 print "Advanced type syntax parsed successfully.";
 
 var p = Point();
-print "Struct instance (syntax stub) created.";
+print "Struct instance created.";
+print "p.x default: " + to_string(p.x);
+print "p.label default: " + p.label;
+
+p.x = 42.0;
+print "p.x adjusted: " + to_string(p.x);
+
+print "Enum access:";
+print(Color.red);
+print(Color.green);
+print(Color.blue);

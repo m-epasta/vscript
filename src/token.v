@@ -47,8 +47,6 @@ enum TokenType {
 	true_keyword
 	false_keyword
 	var_keyword
-	print_keyword
-	println_keyword
 	struct_keyword
 	enum_keyword
 

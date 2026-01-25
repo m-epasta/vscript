@@ -37,7 +37,6 @@ enum OpCode {
 
 	// Stack
 	op_pop
-	op_print
 
 	// Arrays
 	op_build_array
@@ -56,6 +55,10 @@ enum OpCode {
 	op_get_property
 	op_set_property
 	op_method
+
+	// Advanced Types
+	op_struct
+	op_enum
 }
 
 fn (op OpCode) str() string {
@@ -84,7 +87,6 @@ fn (op OpCode) str() string {
 		.op_call { 'OP_CALL' }
 		.op_return { 'OP_RETURN' }
 		.op_pop { 'OP_POP' }
-		.op_print { 'OP_PRINT' }
 		.op_build_array { 'OP_BUILD_ARRAY' }
 		.op_index_get { 'OP_INDEX_GET' }
 		.op_index_set { 'OP_INDEX_SET' }
@@ -97,5 +99,7 @@ fn (op OpCode) str() string {
 		.op_get_property { 'OP_GET_PROPERTY' }
 		.op_set_property { 'OP_SET_PROPERTY' }
 		.op_method { 'OP_METHOD' }
+		.op_struct { 'OP_STRUCT' }
+		.op_enum { 'OP_ENUM' }
 	}
 }

@@ -49,8 +49,8 @@ fn (c &Chunk) disassemble_instruction(offset int) int {
 			c.constant_instruction('OP_CONSTANT', offset)
 		}
 		.op_negate, .op_add, .op_subtract, .op_multiply, .op_divide, .op_modulo, .op_nil, .op_true,
-		.op_false, .op_not, .op_equal, .op_greater, .op_less, .op_pop, .op_print,
-		.op_close_upvalue, .op_return, .op_index_get, .op_index_set {
+		.op_false, .op_not, .op_equal, .op_greater, .op_less, .op_pop, .op_close_upvalue,
+		.op_return, .op_index_get, .op_index_set {
 			c.simple_instruction(instruction.str(), offset)
 		}
 		.op_get_local, .op_set_local, .op_call, .op_build_array, .op_build_map, .op_get_upvalue,
@@ -89,7 +89,15 @@ fn (c &Chunk) disassemble_instruction(offset int) int {
 			}
 			return o
 		}
+		.op_struct, .op_enum {
+			return c.multibyte_instruction(instruction.str(), offset)
+		}
 	}
+}
+
+fn (c &Chunk) multibyte_instruction(name string, offset int) int {
+	println('${name} (variadic payload)')
+	return offset + 1 // Simplified for now
 }
 
 fn (c &Chunk) simple_instruction(name string, offset int) int {

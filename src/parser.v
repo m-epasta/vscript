@@ -24,6 +24,7 @@ fn (mut p Parser) parse() ![]Stmt {
 			continue
 		}
 		stmt := p.declaration() or {
+			eprintln('[line ${p.peek().line}] Error at \'${p.peek().lexeme}\': ${err}')
 			p.had_error = true
 			p.synchronize()
 			continue
@@ -40,8 +41,9 @@ fn (mut p Parser) parse() ![]Stmt {
 
 fn (mut p Parser) declaration() !Stmt {
 	mut attributes := []Attribute{}
-	if p.match_([.at_bracket]) {
-		attributes = p.parse_attributes()!
+	for p.match_([.at_bracket]) {
+		attributes << p.parse_attributes()!
+		for p.match_([.semicolon]) {} // Skip ASI newlines after attribute
 	}
 
 	if p.match_([.class_keyword]) {
@@ -142,14 +144,15 @@ fn (mut p Parser) struct_declaration(attributes []Attribute) !Stmt {
 
 	mut fields := []StructField{}
 	for !p.check(.right_brace) && !p.is_at_end() {
-		for p.match_([.semicolon]) {}
+		for p.match_([.semicolon]) {} // Skip leading/separator ASI
 		if p.check(.right_brace) {
 			break
 		}
 
 		mut f_attrs := []Attribute{}
-		if p.match_([.at_bracket]) {
-			f_attrs = p.parse_attributes()!
+		for p.match_([.at_bracket]) {
+			f_attrs << p.parse_attributes()!
+			for p.match_([.semicolon]) {}
 		}
 
 		f_name := p.consume(.identifier, 'Expect field name')!
@@ -166,6 +169,8 @@ fn (mut p Parser) struct_declaration(attributes []Attribute) !Stmt {
 			initializer: initializer
 			attributes:  f_attrs
 		}
+
+		// Optional separator semicolon (actual or ASI)
 		p.match_([.semicolon])
 	}
 
@@ -193,7 +198,11 @@ fn (mut p Parser) enum_declaration(attributes []Attribute) !Stmt {
 		variants << EnumVariant{
 			name: v_name
 		}
-		p.match_([.comma])
+
+		// Handle comma or semicolon/newline separators
+		if !p.match_([.comma]) {
+			p.match_([.semicolon])
+		}
 		for p.match_([.semicolon]) {}
 	}
 
@@ -208,8 +217,9 @@ fn (mut p Parser) enum_declaration(attributes []Attribute) !Stmt {
 
 fn (mut p Parser) method() !FunctionStmt {
 	mut attributes := []Attribute{}
-	if p.match_([.at_bracket]) {
-		attributes = p.parse_attributes()!
+	for p.match_([.at_bracket]) {
+		attributes << p.parse_attributes()!
+		for p.match_([.semicolon]) {} // Skip ASI newlines after attribute
 	}
 
 	name := p.consume(.identifier, 'Expect method name')!
@@ -250,9 +260,6 @@ fn (mut p Parser) statement() !Stmt {
 	if p.match_([.while_keyword]) {
 		return p.while_statement()
 	}
-	if p.match_([.print_keyword]) {
-		return p.print_statement()
-	}
 	if p.match_([.left_brace]) {
 		return Stmt(BlockStmt{
 			statements: p.block()!
@@ -260,14 +267,6 @@ fn (mut p Parser) statement() !Stmt {
 	}
 
 	return p.expression_statement()
-}
-
-fn (mut p Parser) print_statement() !Stmt {
-	value := p.expression()!
-	p.consume(.semicolon, 'Expect ; after value')!
-	return Stmt(PrintStmt{
-		expression: value
-	})
 }
 
 fn (mut p Parser) for_statement() !Stmt {
@@ -693,8 +692,10 @@ fn (mut p Parser) map_literal() !Expr {
 
 fn (mut p Parser) parse_attributes() ![]Attribute {
 	mut attributes := []Attribute{}
+	for p.match_([.semicolon]) {} // Skip leading ASI
 	if !p.check(.right_bracket) {
 		for {
+			for p.match_([.semicolon]) {}
 			name := p.consume(.identifier, 'Expect attribute name')!
 			mut val := ?Expr(none)
 			if p.match_([.colon]) {
@@ -709,6 +710,7 @@ fn (mut p Parser) parse_attributes() ![]Attribute {
 			}
 		}
 	}
+	for p.match_([.semicolon]) {}
 	p.consume(.right_bracket, "Expect ']' after attributes")!
 	return attributes
 }

@@ -111,8 +111,8 @@ fn (mut s Scanner) scan_token() {
 			// Ignore whitespace
 		}
 		`\n` {
+			s.line++
 			// Newline acts as statement separator - insert virtual semicolon
-			// Only if the previous token could end a statement
 			if s.tokens.len > 0 {
 				last_type := s.tokens[s.tokens.len - 1].type_
 				if last_type in [.identifier, .number, .string, .right_paren, .right_brace,
@@ -120,7 +120,13 @@ fn (mut s Scanner) scan_token() {
 					s.add_token(.semicolon)
 				}
 			}
-			s.line++
+		}
+		`@` {
+			if s.match_char(`[`) {
+				s.add_token(.at_bracket)
+			} else {
+				s.error('Unexpected character: ${c.ascii_str()}')
+			}
 		}
 		`"` {
 			s.string()
@@ -176,8 +182,6 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'true' { .true_keyword }
 		'false' { .false_keyword }
 		'var' { .var_keyword }
-		'print' { .print_keyword }
-		'println' { .println_keyword }
 		'struct' { .struct_keyword }
 		'enum' { .enum_keyword }
 		else { .identifier }

@@ -110,15 +110,10 @@ type Stmt = ExprStmt
 	| ReturnStmt
 	| BlockStmt
 	| ClassStmt
-	| PrintStmt
 	| StructStmt
 	| EnumStmt
 
 struct ExprStmt {
-	expression Expr
-}
-
-struct PrintStmt {
 	expression Expr
 }
 

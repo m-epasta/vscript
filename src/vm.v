@@ -324,9 +324,6 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				vm.stack_top = slots
 				vm.push(result)
 			}
-			.op_print {
-				println(value_to_string(vm.pop()))
-			}
 			.op_build_array {
 				arg_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
 				vm.frames[f_idx].ip++
@@ -442,7 +439,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if name is string {
 					vm.push(ClassValue{
 						name:    name
-						methods: map[string]ClosureValue{}
+						methods: map[string]Value{}
 					})
 				}
 			}
@@ -453,11 +450,10 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if name_val is string {
 					name := name_val as string
 					method := vm.pop()
-					if method is ClosureValue {
-						mut klass := vm.peek(0)
-						if mut klass is ClassValue {
-							klass.methods[name] = method
-						}
+					// Method can be a Closure or a Native wrapper (from decorators)
+					mut klass := vm.peek(0)
+					if mut klass is ClassValue {
+						klass.methods[name] = method
 					}
 				}
 			}
@@ -482,8 +478,25 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 								return .runtime_error
 							}
 						}
+					} else if instance is StructInstanceValue {
+						if name in instance.fields {
+							vm.push(instance.fields[name] or { NilValue{} })
+						} else {
+							vm.runtime_error('Undefined struct field "${name}"')
+							return .runtime_error
+						}
+					} else if instance is EnumValue {
+						if name in instance.variants {
+							vm.push(EnumVariantValue{
+								enum_name: instance.name
+								variant:   name
+							})
+						} else {
+							vm.runtime_error('Undefined enum variant "${name}"')
+							return .runtime_error
+						}
 					} else {
-						vm.runtime_error('Only instances have properties. Got ${vm.typeof(instance)}')
+						vm.runtime_error('Only instances, structs and enums have properties. Got ${vm.typeof(instance)}')
 						return .runtime_error
 					}
 				}
@@ -499,11 +512,79 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					if mut instance is InstanceValue {
 						instance.fields[name] = value
 						vm.push(value)
+					} else if mut instance is StructInstanceValue {
+						instance.fields[name] = value
+						vm.push(value)
 					} else {
-						vm.runtime_error('Only instances have fields')
+						vm.runtime_error('Only instances and structs have fields')
 						return .runtime_error
 					}
 				}
+			}
+			.op_struct {
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name_val := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				name := if name_val is string { name_val } else { 'unknown' }
+				field_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+
+				mut sv := StructValue{
+					name:           name
+					field_names:    []string{cap: int(field_count)}
+					field_types:    map[string]string{}
+					field_defaults: map[string]Value{}
+				}
+
+				for _ in 0 .. field_count {
+					f_name_idx := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+					vm.frames[f_idx].ip++
+					f_type_idx := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+					vm.frames[f_idx].ip++
+
+					f_name_val := vm.frames[f_idx].closure.function.chunk.constants[f_name_idx]
+					f_type_val := vm.frames[f_idx].closure.function.chunk.constants[f_type_idx]
+					f_name := if f_name_val is string { f_name_val } else { 'unknown' }
+					f_type := if f_type_val is string { f_type_val } else { 'unknown' }
+
+					sv.field_names << f_name
+					sv.field_types[f_name] = f_type
+
+					// Default value on stack
+					// VM for advanced types should ideally not rely on op_nil for defaults
+					// if we want to support complex expressions, but for now we'll take what's on stack
+					// wait, the compiler pushes the default value!
+				}
+
+				// Fields are pushed in reverse for defaults
+				for i := sv.field_names.len - 1; i >= 0; i-- {
+					f_name := sv.field_names[i]
+					sv.field_defaults[f_name] = vm.pop()
+				}
+
+				vm.push(sv)
+			}
+			.op_enum {
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				name_val := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				name := if name_val is string { name_val } else { 'unknown' }
+				variant_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+
+				mut ev := EnumValue{
+					name:     name
+					variants: []string{cap: int(variant_count)}
+				}
+
+				for _ in 0 .. variant_count {
+					v_name_idx := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+					vm.frames[f_idx].ip++
+					v_name_val := vm.frames[f_idx].closure.function.chunk.constants[v_name_idx]
+					v_name := if v_name_val is string { v_name_val } else { 'unknown' }
+					ev.variants << v_name
+				}
+				vm.push(ev)
 			}
 		}
 	}
@@ -584,18 +665,32 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			}
 
 			if initializer := callee.methods['init'] {
-				vm.call_closure(initializer, arg_count) or { return false }
-				return true
+				return vm.call_value(initializer, arg_count)
 			} else if arg_count != 0 {
 				vm.runtime_error('Expected 0 arguments but got ${arg_count}')
 				return false
 			}
 			return true
 		}
+		StructValue {
+			if arg_count != 0 {
+				vm.runtime_error('Struct constructors take 0 arguments for now (use fields)')
+				return false
+			}
+			slot := vm.stack_top - 1
+			mut fields := map[string]Value{}
+			for k, v in callee.field_defaults {
+				fields[k] = v
+			}
+			vm.stack[slot] = StructInstanceValue{
+				struct_type: callee
+				fields:      fields
+			}
+			return true
+		}
 		BoundMethodValue {
 			vm.stack[vm.stack_top - arg_count - 1] = callee.receiver
-			vm.call_closure(callee.method, arg_count) or { return false }
-			return true
+			return vm.call_value(callee.method, arg_count)
 		}
 		else {
 			vm.runtime_error('Can only call functions and classes')
@@ -659,6 +754,10 @@ fn (vm &VM) typeof(val Value) string {
 		MapValue { 'map' }
 		ClassValue { 'class' }
 		InstanceValue { 'instance' }
+		StructValue { 'struct_type' }
+		StructInstanceValue { 'struct' }
+		EnumValue { 'enum_type' }
+		EnumVariantValue { 'enum_variant' }
 		BoundMethodValue { 'function' }
 	}
 }

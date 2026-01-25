@@ -483,6 +483,10 @@ fn native_type(mut vm VM, args []Value) Value {
 		MapValue { Value('map') }
 		ClassValue { Value('class') }
 		InstanceValue { Value('instance') }
+		StructValue { Value('struct_type') }
+		StructInstanceValue { Value('struct') }
+		EnumValue { Value('enum_type') }
+		EnumVariantValue { Value('enum_variant') }
 		BoundMethodValue { Value('function') }
 	}
 }

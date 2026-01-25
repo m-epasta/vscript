@@ -5,11 +5,15 @@ type Value = ArrayValue
 	| BoundMethodValue
 	| ClassValue
 	| ClosureValue
+	| EnumValue
+	| EnumVariantValue
 	| FunctionValue
 	| InstanceValue
 	| MapValue
 	| NativeFunctionValue
 	| NilValue
+	| StructInstanceValue
+	| StructValue
 	| bool
 	| f64
 	| string
@@ -52,7 +56,7 @@ mut:
 struct ClassValue {
 	name string
 mut:
-	methods map[string]ClosureValue
+	methods map[string]Value // Can be ClosureValue or NativeFunctionValue wrapper
 }
 
 struct InstanceValue {
@@ -61,9 +65,34 @@ mut:
 	fields map[string]Value
 }
 
+struct StructValue {
+	name string
+mut:
+	field_names    []string
+	field_types    map[string]string
+	field_defaults map[string]Value
+}
+
+struct StructInstanceValue {
+	struct_type StructValue
+mut:
+	fields map[string]Value
+}
+
+struct EnumValue {
+	name string
+mut:
+	variants []string
+}
+
+struct EnumVariantValue {
+	enum_name string
+	variant   string
+}
+
 struct BoundMethodValue {
 	receiver Value
-	method   ClosureValue
+	method   Value // Can be ClosureValue or NativeFunctionValue wrapper
 }
 
 @[heap]
@@ -129,6 +158,18 @@ fn value_to_string(v Value) string {
 		InstanceValue {
 			return '<instance of ${v.class.name}>'
 		}
+		StructValue {
+			return '<struct type ${v.name}>'
+		}
+		StructInstanceValue {
+			return '<struct instance of ${v.struct_type.name}>'
+		}
+		EnumValue {
+			return '<enum ${v.name}>'
+		}
+		EnumVariantValue {
+			return '${v.enum_name}.${v.variant}'
+		}
 		BoundMethodValue {
 			return value_to_string(v.method)
 		}
@@ -155,32 +196,12 @@ fn values_equal(a Value, b Value) bool {
 				return a == b
 			}
 		}
-		ArrayValue {
-			return false
-		}
-		FunctionValue {
-			return false
-		}
-		ClosureValue {
-			return false
-		}
-		NativeFunctionValue {
-			if b is NativeFunctionValue {
-				return a.name == b.name
+		EnumVariantValue {
+			if b is EnumVariantValue {
+				return a.enum_name == b.enum_name && a.variant == b.variant
 			}
 		}
-		MapValue {
-			return false
-		}
-		ClassValue {
-			if b is ClassValue {
-				return a.name == b.name
-			}
-		}
-		InstanceValue {
-			return false
-		}
-		BoundMethodValue {
+		else {
 			return false
 		}
 	}

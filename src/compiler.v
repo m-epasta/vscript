@@ -183,19 +183,68 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 
 			for method in stmt.methods {
 				meth_name_const := c.make_constant(Value(method.name.lexeme))
+
+				// Prepare method decorators
+				for attr in method.attributes {
+					if attr.name.lexeme in ['memoize', 'lru_cache'] {
+						idx := c.make_constant(Value(attr.name.lexeme))
+						c.emit_bytes(u8(OpCode.op_get_global), idx)
+					}
+				}
+
 				c.compile_function(method.name.lexeme, method.params, method.body, .type_function)!
+
+				// Wrap method
+				for i := method.attributes.len - 1; i >= 0; i-- {
+					attr := method.attributes[i]
+					if attr.name.lexeme in ['memoize', 'lru_cache'] {
+						mut arg_count := 1
+						if val := attr.value {
+							c.compile_expr(val)!
+							arg_count++
+						}
+						c.emit_bytes(u8(OpCode.op_call), u8(arg_count))
+					}
+				}
+
 				c.emit_bytes(u8(OpCode.op_method), meth_name_const)
 			}
 
 			c.emit_byte(u8(OpCode.op_pop))
 			c.class_type = old_class_type
 		}
-		PrintStmt {
-			c.compile_expr(stmt.expression)!
-			c.emit_byte(u8(OpCode.op_print))
+		StructStmt {
+			// Evaluated defaults must be on stack before op_struct
+			for field in stmt.fields {
+				if init := field.initializer {
+					c.compile_expr(init)!
+				} else {
+					c.emit_byte(u8(OpCode.op_nil))
+				}
+			}
+
+			name_const := c.make_constant(Value(stmt.name.lexeme))
+			c.emit_bytes(u8(OpCode.op_struct), name_const)
+			c.emit_byte(u8(stmt.fields.len))
+			for field in stmt.fields {
+				f_name_const := c.make_constant(Value(field.name.lexeme))
+				f_type_const := c.make_constant(Value(field.type_name.lexeme))
+				c.emit_byte(f_name_const)
+				c.emit_byte(f_type_const)
+			}
+			// Set global
+			c.emit_bytes(u8(OpCode.op_set_global), name_const)
 		}
-		StructStmt, EnumStmt {
-			// TODO: Implement static data compilation
+		EnumStmt {
+			name_const := c.make_constant(Value(stmt.name.lexeme))
+			c.emit_bytes(u8(OpCode.op_enum), name_const)
+			c.emit_byte(u8(stmt.variants.len))
+			for variant in stmt.variants {
+				v_name_const := c.make_constant(Value(variant.name.lexeme))
+				c.emit_byte(v_name_const)
+			}
+			// Set global
+			c.emit_bytes(u8(OpCode.op_set_global), name_const)
 		}
 	}
 }
@@ -275,18 +324,7 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 			}
 		}
 		CallExpr {
-			// Handle built-in functions
-			if expr.callee is VariableExpr {
-				if expr.callee.name.lexeme == 'println' || expr.callee.name.lexeme == 'print' {
-					for arg in expr.arguments {
-						c.compile_expr(arg)!
-						c.emit_byte(u8(OpCode.op_print))
-					}
-					c.emit_byte(u8(OpCode.op_nil))
-					return
-				}
-			}
-
+			// Handle standard calls
 			c.compile_expr(expr.callee)!
 			for arg in expr.arguments {
 				c.compile_expr(arg)!
@@ -342,7 +380,32 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 }
 
 fn (mut c Compiler) function(stmt FunctionStmt) ! {
+	// 1. Prepare decorator wrappers if any
+	mut wrap_count := 0
+	for attr in stmt.attributes {
+		if attr.name.lexeme in ['memoize', 'lru_cache'] {
+			idx := c.make_constant(Value(attr.name.lexeme))
+			c.emit_bytes(u8(OpCode.op_get_global), idx)
+			wrap_count++
+		}
+	}
+
+	// 2. Compile the core closure
 	c.compile_function(stmt.name.lexeme, stmt.params, stmt.body, .type_function)!
+
+	// 3. Emit wrapper calls
+	// We need to apply them in reverse order of how their globals were pushed (standard stack behavior)
+	for i := stmt.attributes.len - 1; i >= 0; i-- {
+		attr := stmt.attributes[i]
+		if attr.name.lexeme in ['memoize', 'lru_cache'] {
+			mut arg_count := 1
+			if val := attr.value {
+				c.compile_expr(val)!
+				arg_count++
+			}
+			c.emit_bytes(u8(OpCode.op_call), u8(arg_count))
+		}
+	}
 
 	name_const := c.make_constant(Value(stmt.name.lexeme))
 	c.emit_bytes(u8(OpCode.op_set_global), name_const)
