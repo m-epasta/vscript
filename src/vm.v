@@ -1006,6 +1006,15 @@ fn (mut vm VM) runtime_error(message string) bool {
 }
 
 fn (mut vm VM) import_module(path string) !Value {
+	// 0. Intercept Native Modules
+	if path == 'core/fs.vs' {
+		val := create_fs_module(mut vm)
+		// Cache it manually since the caller (op_import) does it,
+		// but op_import logic is: if not cached, call import_module, then cache result.
+		// So we just return the value.
+		return val
+	}
+
 	// 1. Read source
 	// TODO: Handle relative paths more robustly (relative to CWD for now)
 	if !os.exists(path) {
