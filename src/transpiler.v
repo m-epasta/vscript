@@ -26,6 +26,22 @@ fn (mut t Transpiler) transpile_stmts(stmts []Stmt) string {
 fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 	match stmt {
 		EmptyStmt {}
+		TryStmt {
+			t.indent()
+			t.output.write_string('try {\n')
+			t.indent_level++
+			t.visit_stmt(stmt.try_body)
+			t.indent_level--
+			t.indent()
+			t.output.write_string('} catch (')
+			t.output.write_string(stmt.catch_var.lexeme)
+			t.output.write_string(') {\n')
+			t.indent_level++
+			t.visit_stmt(stmt.catch_body)
+			t.indent_level--
+			t.indent()
+			t.output.write_string('}\n')
+		}
 		ExprStmt {
 			t.indent()
 			t.visit_expr(stmt.expression)

@@ -63,6 +63,10 @@ enum OpCode {
 	op_duplicate
 	op_match_variant
 	op_pop_scope
+
+	// Exception Handling
+	op_exception_push
+	op_exception_pop
 }
 
 fn (op OpCode) str() string {
@@ -108,5 +112,7 @@ fn (op OpCode) str() string {
 		.op_duplicate { 'OP_DUPLICATE' }
 		.op_match_variant { 'OP_MATCH_VARIANT' }
 		.op_pop_scope { 'OP_POP_SCOPE' }
+		.op_exception_push { 'OP_EXCEPTION_PUSH' }
+		.op_exception_pop { 'OP_EXCEPTION_POP' }
 	}
 }

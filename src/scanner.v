@@ -191,6 +191,8 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'struct' { .struct_keyword }
 		'enum' { .enum_keyword }
 		'match' { .match_keyword }
+		'try' { .try_keyword }
+		'catch' { .catch_keyword }
 		else { .identifier }
 	}
 }

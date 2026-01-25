@@ -50,6 +50,8 @@ enum TokenType {
 	struct_keyword
 	enum_keyword
 	match_keyword
+	try_keyword
+	catch_keyword
 
 	// Special
 	at_bracket // @[

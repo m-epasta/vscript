@@ -141,6 +141,13 @@ type Stmt = ExprStmt
 	| StructStmt
 	| EnumStmt
 	| EmptyStmt
+	| TryStmt
+
+struct TryStmt {
+	try_body   Stmt
+	catch_var  Token
+	catch_body Stmt
+}
 
 struct EmptyStmt {}
 

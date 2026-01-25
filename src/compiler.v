@@ -122,6 +122,29 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			c.emit_byte(u8(OpCode.op_pop))
 		}
 		EmptyStmt {}
+		TryStmt {
+			// 1. Setup exception handler
+			catch_jump := c.emit_jump(u8(OpCode.op_exception_push))
+
+			// 2. Compile try body
+			c.compile_stmt(stmt.try_body)!
+
+			// 3. If success, pop exception handler and jump over catch
+			c.emit_byte(u8(OpCode.op_exception_pop))
+			success_jump := c.emit_jump(u8(OpCode.op_jump))
+
+			// 4. Catch block entry point (jumped to by VM on exception)
+			c.patch_jump(catch_jump)
+
+			c.begin_scope()
+			// The exception value is on the stack pushed by VM
+			c.named_variable(stmt.catch_var, true)! // Define catch variable
+			c.compile_stmt(stmt.catch_body)!
+			c.end_scope()
+
+			// 5. End of try-catch
+			c.patch_jump(success_jump)
+		}
 		ForStmt {
 			c.begin_scope()
 

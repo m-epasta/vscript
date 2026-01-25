@@ -18,15 +18,24 @@ mut:
 	slots   int
 }
 
+struct ExceptionHandler {
+	frame_count        int
+	stack_top          int
+	handler_ip         int
+	close_upvalues_idx int
+}
+
 struct VM {
 mut:
-	frames        []CallFrame
-	frame_count   int
-	stack         []Value
-	stack_top     int
-	globals       map[string]Value
-	open_upvalues []&Upvalue
-	is_test_mode  bool
+	frames             []CallFrame
+	frame_count        int
+	stack              []Value
+	stack_top          int
+	globals            map[string]Value
+	open_upvalues      []&Upvalue
+	is_test_mode       bool
+	exception_handlers []ExceptionHandler
+	recovering         bool
 }
 
 fn new_vm() VM {
@@ -57,13 +66,14 @@ fn new_vm() VM {
 		}
 
 		mut vm := VM{
-			frames:        frames
-			frame_count:   0
-			stack:         []Value{len: stack_max, init: NilValue{}}
-			stack_top:     0
-			globals:       map[string]Value{}
-			open_upvalues: []&Upvalue{}
-			is_test_mode:  false
+			frames:             frames
+			frame_count:        0
+			stack:              []Value{len: stack_max, init: NilValue{}}
+			stack_top:          0
+			globals:            map[string]Value{}
+			open_upvalues:      []&Upvalue{}
+			is_test_mode:       false
+			exception_handlers: []ExceptionHandler{cap: 16}
 		}
 		vm.register_stdlib()
 		return vm
@@ -90,13 +100,16 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 	}
 
 	vm.push(Value(closure))
-	vm.call_closure(closure, 0) or { return .runtime_error }
+	if !vm.call_closure(closure, 0) {
+		return .runtime_error
+	}
 
 	return vm.run(0)
 }
 
 fn (mut vm VM) run(target_frame_count int) InterpretResult {
 	for vm.frame_count > target_frame_count {
+		vm.recovering = false
 		f_idx := vm.frame_count - 1
 
 		instruction := unsafe { OpCode(vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]) }
@@ -140,7 +153,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					if val := vm.globals[name] {
 						vm.push(val)
 					} else {
-						vm.runtime_error('Undefined variable "${name}"')
+						if vm.runtime_error('Undefined variable "${name}"') {
+							continue
+						}
 						return .runtime_error
 					}
 				}
@@ -165,7 +180,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if v_a is f64 && v_b is f64 {
 					vm.push(v_a > v_b)
 				} else {
-					vm.runtime_error('Operands must be numbers')
+					if vm.runtime_error('Operands must be numbers') {
+						continue
+					}
 					return .runtime_error
 				}
 			}
@@ -175,7 +192,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if v_a is f64 && v_b is f64 {
 					vm.push(v_a < v_b)
 				} else {
-					vm.runtime_error('Operands must be numbers')
+					if vm.runtime_error('Operands must be numbers') {
+						continue
+					}
 					return .runtime_error
 				}
 			}
@@ -187,7 +206,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				} else if v_a is string || v_b is string {
 					vm.push(value_to_string(v_a) + value_to_string(v_b))
 				} else {
-					vm.runtime_error('Operands must be two numbers or two strings')
+					if vm.runtime_error('Operands must be two numbers or two strings') {
+						continue
+					}
 					return .runtime_error
 				}
 			}
@@ -197,7 +218,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if v_a is f64 && v_b is f64 {
 					vm.push(v_a - v_b)
 				} else {
-					vm.runtime_error('Operands must be numbers')
+					if vm.runtime_error('Operands must be numbers') {
+						continue
+					}
 					return .runtime_error
 				}
 			}
@@ -207,7 +230,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if v_a is f64 && v_b is f64 {
 					vm.push(v_a * v_b)
 				} else {
-					vm.runtime_error('Operands must be numbers')
+					if vm.runtime_error('Operands must be numbers') {
+						continue
+					}
 					return .runtime_error
 				}
 			}
@@ -217,7 +242,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if v_a is f64 && v_b is f64 {
 					vm.push(v_a / v_b)
 				} else {
-					vm.runtime_error('Operands must be numbers')
+					if vm.runtime_error('Operands must be numbers') {
+						continue
+					}
 					return .runtime_error
 				}
 			}
@@ -436,7 +463,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						return .runtime_error
 					}
 				} else {
-					vm.runtime_error('Can only index arrays, maps or instances')
+					if vm.runtime_error('Can only index arrays, maps or instances') {
+						continue
+					}
 					return .runtime_error
 				}
 			}
@@ -523,7 +552,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 									method:   method
 								})
 							} else {
-								vm.runtime_error('Undefined property "${name}"')
+								if vm.runtime_error('Undefined property "${name}"') {
+									continue
+								}
 								return .runtime_error
 							}
 						}
@@ -531,7 +562,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						if name in instance.fields {
 							vm.push(instance.fields[name] or { NilValue{} })
 						} else {
-							vm.runtime_error('Undefined struct field "${name}"')
+							if vm.runtime_error('Undefined struct field "${name}"') {
+								continue
+							}
 							return .runtime_error
 						}
 					} else if instance is EnumValue {
@@ -541,7 +574,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 								variant:   name
 							})
 						} else {
-							vm.runtime_error('Undefined enum variant "${name}"')
+							if vm.runtime_error('Undefined enum variant "${name}"') {
+								continue
+							}
 							return .runtime_error
 						}
 					} else if instance is EnumVariantValue {
@@ -691,6 +726,25 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				}
 				vm.push(ev)
 			}
+			.op_exception_push {
+				b1 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				b2 := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip + 1]
+				vm.frames[f_idx].ip += 2
+				offset := (u16(b1) << 8) | u16(b2)
+				handler_ip := vm.frames[f_idx].ip + int(offset)
+
+				vm.exception_handlers << ExceptionHandler{
+					frame_count:        vm.frame_count
+					stack_top:          vm.stack_top
+					handler_ip:         handler_ip
+					close_upvalues_idx: vm.stack_top
+				}
+			}
+			.op_exception_pop {
+				if vm.exception_handlers.len > 0 {
+					vm.exception_handlers.pop()
+				}
+			}
 		}
 	}
 	return .ok
@@ -731,12 +785,16 @@ fn (mut vm VM) close_upvalues(last_slot int) {
 fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 	match callee {
 		ClosureValue {
-			vm.call_closure(callee, arg_count) or { return false }
+			if !vm.call_closure(callee, arg_count) {
+				return false
+			}
 			return true
 		}
 		NativeFunctionValue {
 			if callee.arity != -1 && arg_count != callee.arity {
-				vm.runtime_error('Expected ${callee.arity} arguments but got ${arg_count}')
+				if vm.runtime_error('Expected ${callee.arity} arguments but got ${arg_count}') {
+					return true
+				}
 				return false
 			}
 
@@ -746,6 +804,10 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			}
 
 			result := callee.func(mut vm, args)
+
+			if vm.recovering {
+				return true
+			}
 
 			for _ in 0 .. arg_count + 1 {
 				vm.pop()
@@ -759,7 +821,9 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 				function: callee
 				upvalues: []&Upvalue{}
 			}
-			vm.call_closure(closure, arg_count) or { return false }
+			if !vm.call_closure(closure, arg_count) {
+				return false
+			}
 			return true
 		}
 		ClassValue {
@@ -772,14 +836,18 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			if initializer := callee.methods['init'] {
 				return vm.call_value(initializer, arg_count)
 			} else if arg_count != 0 {
-				vm.runtime_error('Expected 0 arguments but got ${arg_count}')
+				if vm.runtime_error('Expected 0 arguments but got ${arg_count}') {
+					return true
+				}
 				return false
 			}
 			return true
 		}
 		StructValue {
 			if arg_count != 0 {
-				vm.runtime_error('Struct constructors take 0 arguments for now (use fields)')
+				if vm.runtime_error('Struct constructors take 0 arguments for now (use fields)') {
+					return true
+				}
 				return false
 			}
 			slot := vm.stack_top - 1
@@ -813,21 +881,27 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			return true
 		}
 		else {
-			vm.runtime_error('Can only call functions and classes')
+			if vm.runtime_error('Can only call functions and classes') {
+				return true
+			}
 			return false
 		}
 	}
 }
 
-fn (mut vm VM) call_closure(closure ClosureValue, arg_count int) ! {
+fn (mut vm VM) call_closure(closure ClosureValue, arg_count int) bool {
 	if arg_count != closure.function.arity {
-		vm.runtime_error('Expected ${closure.function.arity} arguments but got ${arg_count}')
-		return error('Arity mismatch')
+		if vm.runtime_error('Expected ${closure.function.arity} arguments but got ${arg_count}') {
+			return true
+		}
+		return false
 	}
 
 	if vm.frame_count == 64 {
-		vm.runtime_error('Stack overflow')
-		return error('Stack overflow')
+		if vm.runtime_error('Stack overflow') {
+			return true
+		}
+		return false
 	}
 
 	mut frame := &vm.frames[vm.frame_count]
@@ -835,6 +909,7 @@ fn (mut vm VM) call_closure(closure ClosureValue, arg_count int) ! {
 	frame.closure = closure
 	frame.ip = 0
 	frame.slots = vm.stack_top - arg_count - 1
+	return true
 }
 
 fn (mut vm VM) push(val Value) {
@@ -882,8 +957,22 @@ fn (vm &VM) typeof(val Value) string {
 	}
 }
 
-fn (vm &VM) runtime_error(message string) {
+fn (mut vm VM) runtime_error(message string) bool {
+	if vm.exception_handlers.len > 0 {
+		handler := vm.exception_handlers.pop()
+		vm.frame_count = handler.frame_count
+		vm.stack_top = handler.stack_top
+		vm.frames[vm.frame_count - 1].ip = handler.handler_ip
+
+		vm.close_upvalues(handler.close_upvalues_idx)
+
+		vm.push(Value(message))
+		vm.recovering = true
+		return true
+	}
+
 	eprintln('Runtime error: ${message}')
+	return false
 }
 
 // Run all functions marked with @[test]

@@ -308,6 +308,9 @@ fn (mut p Parser) statement() !Stmt {
 	if p.match_([.if_keyword]) {
 		return p.if_statement()
 	}
+	if p.match_([.try_keyword]) {
+		return p.try_statement()
+	}
 	if p.match_([.return_keyword]) {
 		return p.return_statement()
 	}
@@ -394,6 +397,30 @@ fn (mut p Parser) while_statement() !Stmt {
 	return Stmt(WhileStmt{
 		condition: condition
 		body:      body
+	})
+}
+
+fn (mut p Parser) try_statement() !Stmt {
+	// 'try' is already matched
+	p.consume(.left_brace, "Expect '{' before try body")!
+	try_body := Stmt(BlockStmt{
+		statements: p.block()!
+	})
+
+	p.consume(.catch_keyword, "Expect 'catch' after try block")!
+	p.consume(.left_paren, "Expect '(' after catch")!
+	catch_var := p.consume(.identifier, 'Expect identifier for catch error')!
+	p.consume(.right_paren, "Expect ')' after catch identifier")!
+
+	p.consume(.left_brace, "Expect '{' before catch body")!
+	catch_body := Stmt(BlockStmt{
+		statements: p.block()!
+	})
+
+	return Stmt(TryStmt{
+		try_body:   try_body
+		catch_var:  catch_var
+		catch_body: catch_body
 	})
 }
 

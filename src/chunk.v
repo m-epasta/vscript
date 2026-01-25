@@ -60,8 +60,11 @@ fn (c &Chunk) disassemble_instruction(offset int) int {
 		.op_get_global, .op_set_global, .op_class, .op_get_property, .op_set_property, .op_method {
 			c.constant_instruction(instruction.str(), offset)
 		}
-		.op_jump, .op_jump_if_false {
+		.op_jump, .op_jump_if_false, .op_exception_push {
 			c.jump_instruction(instruction.str(), 1, offset)
+		}
+		.op_exception_pop {
+			c.simple_instruction(instruction.str(), offset)
 		}
 		.op_loop {
 			c.jump_instruction(instruction.str(), -1, offset)
