@@ -56,9 +56,12 @@ enum OpCode {
 	op_set_property
 	op_method
 
-	// Advanced Types
 	op_struct
 	op_enum
+
+	// Pattern Matching
+	op_duplicate
+	op_match_variant
 }
 
 fn (op OpCode) str() string {
@@ -101,5 +104,7 @@ fn (op OpCode) str() string {
 		.op_method { 'OP_METHOD' }
 		.op_struct { 'OP_STRUCT' }
 		.op_enum { 'OP_ENUM' }
+		.op_duplicate { 'OP_DUPLICATE' }
+		.op_match_variant { 'OP_MATCH_VARIANT' }
 	}
 }

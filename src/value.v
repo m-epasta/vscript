@@ -88,6 +88,7 @@ mut:
 struct EnumVariantValue {
 	enum_name string
 	variant   string
+	values    []Value // Associated data for Sum Types
 }
 
 struct BoundMethodValue {
@@ -198,7 +199,18 @@ fn values_equal(a Value, b Value) bool {
 		}
 		EnumVariantValue {
 			if b is EnumVariantValue {
-				return a.enum_name == b.enum_name && a.variant == b.variant
+				if a.enum_name != b.enum_name || a.variant != b.variant {
+					return false
+				}
+				if a.values.len != b.values.len {
+					return false
+				}
+				for i in 0 .. a.values.len {
+					if !values_equal(a.values[i], b.values[i]) {
+						return false
+					}
+				}
+				return true
 			}
 		}
 		else {

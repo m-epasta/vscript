@@ -324,6 +324,38 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				vm.stack_top = slots
 				vm.push(result)
 			}
+			.op_duplicate {
+				vm.push(vm.peek(0))
+			}
+			.op_match_variant {
+				enum_idx := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				variant_idx := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+
+				enum_val := vm.frames[f_idx].closure.function.chunk.constants[enum_idx]
+				variant_val := vm.frames[f_idx].closure.function.chunk.constants[variant_idx]
+
+				enum_name := if enum_val is string { enum_val } else { '' }
+				variant_name := if variant_val is string { variant_val } else { '' }
+
+				target := vm.pop()
+				if target is EnumVariantValue {
+					// Match if variant name matches, and enum name matches IF it was specified
+					if target.variant == variant_name
+						&& (enum_name == '' || target.enum_name == enum_name) {
+						vm.push(Value(true))
+						// Push data for binding
+						for val in target.values {
+							vm.push(val)
+						}
+					} else {
+						vm.push(Value(false))
+					}
+				} else {
+					vm.push(Value(false))
+				}
+			}
 			.op_build_array {
 				arg_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
 				vm.frames[f_idx].ip++
@@ -691,6 +723,21 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 		BoundMethodValue {
 			vm.stack[vm.stack_top - arg_count - 1] = callee.receiver
 			return vm.call_value(callee.method, arg_count)
+		}
+		EnumVariantValue {
+			mut vals := []Value{cap: arg_count}
+			for i := 0; i < arg_count; i++ {
+				vals << vm.peek(arg_count - 1 - i)
+			}
+			for _ in 0 .. arg_count + 1 {
+				vm.pop()
+			}
+			vm.push(EnumVariantValue{
+				enum_name: callee.enum_name
+				variant:   callee.variant
+				values:    vals
+			})
+			return true
 		}
 		else {
 			vm.runtime_error('Can only call functions and classes')

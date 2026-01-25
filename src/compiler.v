@@ -376,6 +376,40 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 			c.named_variable(Token{ type_: .this_keyword, lexeme: 'this', line: expr.keyword.line },
 				false)!
 		}
+		MatchExpr {
+			c.compile_match(expr)!
+		}
+	}
+}
+
+fn (mut c Compiler) compile_match(expr MatchExpr) ! {
+	// 1. Evaluate target
+	c.compile_expr(expr.target)!
+
+	// 2. Prepare end jump list
+	mut end_jumps := []int{}
+
+	for arm in expr.arms {
+		// Pattern matching logic (simplified for now: push pattern and call op_equal)
+		// This will be replaced by specialized pattern opcodes
+		match arm.pattern {
+			LiteralPattern {
+				c.emit_byte(u8(OpCode.op_constant)) // We need op_duplicate really
+				// ... implementation details ...
+			}
+			else {
+				// Stub
+			}
+		}
+		// ... more logic ...
+	}
+
+	// Default case (pop target)
+	c.emit_byte(u8(OpCode.op_pop))
+	c.emit_byte(u8(OpCode.op_nil))
+
+	for jump in end_jumps {
+		c.patch_jump(jump)
 	}
 }
 

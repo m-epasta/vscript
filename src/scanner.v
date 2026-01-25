@@ -86,7 +86,13 @@ fn (mut s Scanner) scan_token() {
 			s.add_token(if s.match_char(`=`) { .bang_equal } else { .bang })
 		}
 		`=` {
-			s.add_token(if s.match_char(`=`) { .equal_equal } else { .equal })
+			if s.match_char(`=`) {
+				s.add_token(.equal_equal)
+			} else if s.match_char(`>`) {
+				s.add_token(.fat_arrow)
+			} else {
+				s.add_token(.equal)
+			}
 		}
 		`<` {
 			s.add_token(if s.match_char(`=`) { .less_equal } else { .less })
@@ -184,6 +190,7 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'var' { .var_keyword }
 		'struct' { .struct_keyword }
 		'enum' { .enum_keyword }
+		'match' { .match_keyword }
 		else { .identifier }
 	}
 }

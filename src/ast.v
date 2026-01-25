@@ -23,6 +23,7 @@ type Expr = BinaryExpr
 	| GetExpr
 	| SetExpr
 	| ThisExpr
+	| MatchExpr
 
 struct BinaryExpr {
 	left     Expr
@@ -98,6 +99,33 @@ struct SetExpr {
 
 struct ThisExpr {
 	keyword Token
+}
+
+struct MatchExpr {
+	target Expr
+	arms   []MatchArm
+}
+
+struct MatchArm {
+	pattern Pattern
+	body    Expr // Match arms in vscript return values
+}
+
+// Patterns for match
+type Pattern = VariantPattern | LiteralPattern | IdentifierPattern
+
+struct VariantPattern {
+	enum_name ?Token // Optional (e.g. Color.red or just red)
+	variant   Token
+	params    []Token // Bound variables
+}
+
+struct LiteralPattern {
+	value LiteralExpr
+}
+
+struct IdentifierPattern {
+	name Token // Default/catch-all
 }
 
 // Statement types
@@ -182,5 +210,6 @@ struct EnumStmt {
 }
 
 struct EnumVariant {
-	name Token
+	name   Token
+	params []Token // Associated data types
 }

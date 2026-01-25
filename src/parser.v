@@ -170,8 +170,11 @@ fn (mut p Parser) struct_declaration(attributes []Attribute) !Stmt {
 			attributes:  f_attrs
 		}
 
-		// Optional separator semicolon (actual or ASI)
-		p.match_([.semicolon])
+		// Optional separator comma or semicolon (actual or ASI)
+		if !p.match_([.comma]) {
+			p.match_([.semicolon])
+		}
+		for p.match_([.semicolon]) {}
 	}
 
 	p.consume(.right_brace, "Expect '}' after struct body")!
@@ -195,8 +198,22 @@ fn (mut p Parser) enum_declaration(attributes []Attribute) !Stmt {
 		}
 
 		v_name := p.consume(.identifier, 'Expect variant name')!
+		mut params := []Token{}
+		if p.match_([.left_paren]) {
+			if !p.check(.right_paren) {
+				for {
+					params << p.consume(.identifier, 'Expect parameter type name')!
+					if !p.match_([.comma]) {
+						break
+					}
+				}
+			}
+			p.consume(.right_paren, 'Expect ) after enum variant parameters')!
+		}
+
 		variants << EnumVariant{
-			name: v_name
+			name:   v_name
+			params: params
 		}
 
 		// Handle comma or semicolon/newline separators
@@ -615,27 +632,144 @@ fn (mut p Parser) primary() !Expr {
 	}
 
 	if p.match_([.fn_keyword]) {
-		p.consume(.left_paren, 'Expect ( after fn')!
-		mut params := []Token{}
-		if !p.check(.right_paren) {
-			for {
-				params << p.consume(.identifier, 'Expect parameter name')!
-				if !p.match_([.comma]) {
-					break
-				}
-			}
-		}
-		p.consume(.right_paren, 'Expect ) after parameters')!
-		p.consume(.left_brace, 'Expect { before function body')!
-		body := p.block()!
-		return Expr(FunctionExpr{
-			params:     params
-			body:       body
-			attributes: []Attribute{}
-		})
+		return p.function_expression()
+	}
+
+	if p.match_([.match_keyword]) {
+		return p.match_expression()
 	}
 
 	return error('Expect expression')
+}
+
+fn (mut p Parser) function_expression() !Expr {
+	p.consume(.left_paren, 'Expect ( after fn')!
+	mut params := []Token{}
+	if !p.check(.right_paren) {
+		for {
+			params << p.consume(.identifier, 'Expect parameter name')!
+			if !p.match_([.comma]) {
+				break
+			}
+		}
+	}
+	p.consume(.right_paren, 'Expect ) after parameters')!
+	p.consume(.left_brace, 'Expect { before function body')!
+	body := p.block()!
+	return Expr(FunctionExpr{
+		params:     params
+		body:       body
+		attributes: []Attribute{}
+	})
+}
+
+fn (mut p Parser) match_expression() !Expr {
+	target := p.expression()!
+	p.consume(.left_brace, "Expect '{' after match target")!
+
+	mut arms := []MatchArm{}
+	for !p.check(.right_brace) && !p.is_at_end() {
+		for p.match_([.semicolon]) {}
+		if p.check(.right_brace) {
+			break
+		}
+
+		pattern := p.parse_pattern()!
+		p.consume(.fat_arrow, "Expect '=>' after pattern")!
+
+		mut body := Expr(LiteralExpr{
+			value: 'nil'
+			type_: .nil_keyword
+		})
+
+		if p.match_([.left_brace]) {
+			statements := p.block()!
+			body = Expr(FunctionExpr{
+				params:     []Token{}
+				body:       statements
+				attributes: []Attribute{}
+			})
+		} else {
+			body = p.expression()!
+		}
+
+		arms << MatchArm{
+			pattern: pattern
+			body:    body
+		}
+		p.match_([.comma])
+		for p.match_([.semicolon]) {}
+	}
+
+	p.consume(.right_brace, "Expect '}' after match arms")!
+
+	return Expr(MatchExpr{
+		target: target
+		arms:   arms
+	})
+}
+
+fn (mut p Parser) parse_pattern() !Pattern {
+	if p.match_([.number, .string, .true_keyword, .false_keyword, .nil_keyword]) {
+		return Pattern(LiteralPattern{
+			value: LiteralExpr{
+				value: p.previous().literal
+				type_: p.previous().type_
+			}
+		})
+	}
+
+	if p.match_([.identifier]) {
+		name := p.previous()
+
+		// Could be a variant name maybe? like Option.some
+		if p.match_([.dot]) {
+			variant := p.consume(.identifier, 'Expect variant name after .')!
+			mut params := []Token{}
+			if p.match_([.left_paren]) {
+				if !p.check(.right_paren) {
+					for {
+						params << p.consume(.identifier, 'Expect parameter name')!
+						if !p.match_([.comma]) {
+							break
+						}
+					}
+				}
+				p.consume(.right_paren, 'Expect ) after variant pattern')!
+			}
+			return Pattern(VariantPattern{
+				enum_name: name
+				variant:   variant
+				params:    params
+			})
+		}
+
+		// Just a variant or a catch-all?
+		// For now, if it's followed by '(' it's a variant literal pattern
+		if p.match_([.left_paren]) {
+			mut params := []Token{}
+			if !p.check(.right_paren) {
+				for {
+					params << p.consume(.identifier, 'Expect parameter name')!
+					if !p.match_([.comma]) {
+						break
+					}
+				}
+			}
+			p.consume(.right_paren, 'Expect ) after variant pattern')!
+			return Pattern(VariantPattern{
+				enum_name: none
+				variant:   name
+				params:    params
+			})
+		}
+
+		return Pattern(IdentifierPattern{
+			name: name
+		})
+	}
+
+	return error('Expect pattern')
 }
 
 fn (mut p Parser) array_literal() !Expr {

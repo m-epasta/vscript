@@ -307,6 +307,10 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 		ThisExpr {
 			t.output.write_string('this')
 		}
+		MatchExpr {
+			// TODO: Implement JS transpilation for pattern matching
+			t.output.write_string('/* match expression stub */')
+		}
 	}
 }
 
