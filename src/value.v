@@ -13,6 +13,7 @@ type Value = ArrayValue
 	| NativeFunctionValue
 	| NilValue
 	| PromiseValue
+	| StreamValue
 	| StructInstanceValue
 	| StructValue
 	| bool
@@ -20,6 +21,14 @@ type Value = ArrayValue
 	| string
 
 struct NilValue {}
+
+@[heap]
+struct StreamValue {
+pub:
+	chunks chan string
+mut:
+	is_closed bool
+}
 
 struct FunctionValue {
 pub:
@@ -198,6 +207,9 @@ fn value_to_string(v Value) string {
 		}
 		PromiseValue {
 			return '<Promise id=${v.id}>'
+		}
+		StreamValue {
+			return '<Stream>'
 		}
 	}
 }

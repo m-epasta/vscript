@@ -1,7 +1,7 @@
 module main
 
 // fetch(url, options) -> Promise<Result<Response>>
-fn create_http2_module(mut vm VM) Value {
+fn create_http3_module(mut vm VM) Value {
 	mut exports := map[string]Value{}
 
 	vm.define_native_in_map(mut exports, 'fetch', 2, fn (mut vm VM, args []Value) Value {
@@ -29,7 +29,8 @@ fn create_http2_module(mut vm VM) Value {
 			}
 
 			C.curl_easy_setopt(handle, curlopt_url, url.str)
-			C.curl_easy_setopt(handle, curlopt_http_version, curl_http_version_2_0)
+			// Force HTTP/3
+			C.curl_easy_setopt(handle, curlopt_http_version, curl_http_version_3)
 			C.curl_easy_setopt(handle, curlopt_pipewait, voidptr(curl_pipewait))
 
 			// Context on heap for body gathering and callback context

@@ -47,8 +47,11 @@ mut:
 	next_promise_id        int
 	current_native_context []Value
 	curl_multi_handle      &C.CURLM
-	active_transfers       map[voidptr]int     // easy_handle -> promise_id
-	transfer_bodies        map[voidptr]&string // easy_handle -> buffer pointer (on heap)
+	active_transfers       map[voidptr]int         // easy_handle -> promise_id
+	transfer_bodies        map[voidptr]&string     // easy_handle -> buffer pointer (on heap)
+	stream_queues          map[voidptr]chan string // easy_handle -> chunk channel
+	stream_headers_done    map[voidptr]bool        // easy_handle -> bool
+	curl_share_handle      &C.CURLSH
 }
 
 fn new_vm() VM {
@@ -79,20 +82,30 @@ fn new_vm() VM {
 		}
 
 		mut vm := VM{
-			frames:             frames
-			frame_count:        0
-			stack:              []Value{len: stack_max, init: NilValue{}}
-			stack_top:          0
-			globals:            map[string]Value{}
-			open_upvalues:      []&Upvalue{}
-			is_test_mode:       false
-			exception_handlers: []ExceptionHandler{cap: 16}
-			modules:            map[string]Value{}
-			task_results:       chan TaskResult{cap: 100}
-			curl_multi_handle:  C.curl_multi_init()
-			active_transfers:   map[voidptr]int{}
-			transfer_bodies:    map[voidptr]&string{}
+			frames:              frames
+			frame_count:         0
+			stack:               []Value{len: stack_max, init: NilValue{}}
+			stack_top:           0
+			globals:             map[string]Value{}
+			open_upvalues:       []&Upvalue{}
+			is_test_mode:        false
+			exception_handlers:  []ExceptionHandler{cap: 16}
+			modules:             map[string]Value{}
+			task_results:        chan TaskResult{cap: 100}
+			curl_multi_handle:   C.curl_multi_init()
+			active_transfers:    map[voidptr]int{}
+			transfer_bodies:     map[voidptr]&string{}
+			stream_queues:       map[voidptr]chan string{}
+			stream_headers_done: map[voidptr]bool{}
+			curl_share_handle:   C.curl_share_init()
 		}
+
+		// Configure global share handle
+		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_cookie))
+		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_dns))
+		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_ssl_session))
+		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_connect))
+
 		vm.register_stdlib()
 		return vm
 	}
@@ -104,8 +117,54 @@ fn (mut vm VM) poll_curl_multi() {
 	}
 
 	mut still_running := 0
+	C.curl_multi_poll(vm.curl_multi_handle, 0, 0, 1, &still_running)
 	C.curl_multi_perform(vm.curl_multi_handle, &still_running)
 
+	// Phase 1: Early Resolution for Streaming
+	for handle, id in vm.active_transfers {
+		if q := vm.stream_queues[handle] {
+			if vm.stream_headers_done[handle] {
+				if mut state := vm.promises[id] {
+					if state.status == .pending {
+						mut status := 0
+						C.curl_easy_getinfo(handle, 2097154, &status)
+
+						mut resp_map := map[string]Value{}
+						resp_map['status'] = Value(f64(status))
+						resp_map['ok'] = Value(status >= 200 && status < 300)
+						resp_map['protocol'] = Value('Elite Unified (Streaming)')
+
+						stream_obj := StreamValue{
+							chunks: q
+						}
+
+						mut stream_res := map[string]Value{}
+						vm.define_native_in_map_with_context(mut stream_res, 'read', 0,
+							[Value(stream_obj)], native_stream_read)
+						vm.define_native_in_map_with_context(mut stream_res, 'is_closed',
+							0, [Value(stream_obj)], native_stream_is_closed)
+
+						resp_map['body'] = Value(MapValue{
+							items: stream_res
+						})
+
+						state.value = Value(EnumVariantValue{
+							enum_name: 'Result'
+							variant:   'ok'
+							values:    [
+								Value(MapValue{
+									items: resp_map
+								}),
+							]
+						})
+						state.status = .resolved
+					}
+				}
+			}
+		}
+	}
+
+	// Phase 2: Final Resolution
 	mut msgs_in_queue := 0
 	for {
 		msg := C.curl_multi_info_read(vm.curl_multi_handle, &msgs_in_queue)
@@ -117,48 +176,51 @@ fn (mut vm VM) poll_curl_multi() {
 			easy_handle := msg.easy_handle
 			id := vm.active_transfers[easy_handle] or { continue }
 
-			// Extract info
-			mut status := 0
-			C.curl_easy_getinfo(easy_handle, 2097154, &status)
-
-			body_ptr := vm.transfer_bodies[easy_handle] or { continue }
-			body := *body_ptr
-
-			mut resp_map := map[string]Value{}
-			resp_map['status'] = Value(f64(status))
-			resp_map['body'] = Value(body)
-			resp_map['ok'] = Value(status >= 200 && status < 300)
-			resp_map['protocol'] = Value('HTTP/2 (Multiplexed)')
-
-			// Resolution
 			if mut state := vm.promises[id] {
-				// Attach .json() helper
-				vm.define_native_in_map_with_context(mut resp_map, 'json', 0, [
-					Value(body),
-				], fn (mut v VM, a []Value) Value {
-					body_str := value_to_string(v.current_native_context[0])
-					raw := json2.decode[json2.Any](body_str) or {
+				if state.status == .pending {
+					mut status := 0
+					C.curl_easy_getinfo(easy_handle, 2097154, &status)
+
+					body_ptr := vm.transfer_bodies[easy_handle] or { continue }
+					body := *body_ptr
+
+					mut resp_map := map[string]Value{}
+					resp_map['status'] = Value(f64(status))
+					resp_map['body'] = Value(body)
+					resp_map['ok'] = Value(status >= 200 && status < 300)
+					resp_map['protocol'] = Value('Elite Unified')
+
+					vm.define_native_in_map_with_context(mut resp_map, 'json', 0, [
+						Value(body),
+					], fn (mut v VM, a []Value) Value {
+						body_str := value_to_string(v.current_native_context[0])
+						raw := json2.decode[json2.Any](body_str) or {
+							return Value(EnumVariantValue{
+								enum_name: 'Result'
+								variant:   'err'
+								values:    [Value('Failed to parse JSON')]
+							})
+						}
 						return Value(EnumVariantValue{
 							enum_name: 'Result'
-							variant:   'err'
-							values:    [Value('Failed to parse JSON')]
+							variant:   'ok'
+							values:    [json_to_value(raw)]
 						})
-					}
-					return Value(EnumVariantValue{
+					})
+
+					state.value = Value(EnumVariantValue{
 						enum_name: 'Result'
 						variant:   'ok'
-						values:    [json_to_value(raw)]
+						values:    [Value(MapValue{
+							items: resp_map
+						})]
 					})
-				})
+					state.status = .resolved
+				}
+			}
 
-				state.value = Value(EnumVariantValue{
-					enum_name: 'Result'
-					variant:   'ok'
-					values:    [Value(MapValue{
-						items: resp_map
-					})]
-				})
-				state.status = .resolved
+			if q := vm.stream_queues[easy_handle] {
+				q.close()
 			}
 
 			// Cleanup
@@ -166,9 +228,43 @@ fn (mut vm VM) poll_curl_multi() {
 			C.curl_easy_cleanup(easy_handle)
 			vm.active_transfers.delete(easy_handle)
 			vm.transfer_bodies.delete(easy_handle)
-			// Note: body_ptr cleanup handled by V's GC or manual if we used unsafe alloc
+			vm.stream_queues.delete(easy_handle)
+			vm.stream_headers_done.delete(easy_handle)
 		}
 	}
+}
+
+fn native_stream_read(mut vm VM, args []Value) Value {
+	stream := vm.current_native_context[0] as StreamValue
+	id := vm.next_promise_id
+	vm.next_promise_id++
+	state := &PromiseState{
+		status: .pending
+		value:  NilValue{}
+	}
+	vm.promises[id] = state
+	spawn fn (id int, q chan string, results_chan chan TaskResult) {
+		chunk := <-q or {
+			results_chan <- TaskResult{
+				id:     id
+				result: Value(NilValue{})
+			}
+			return
+		}
+		results_chan <- TaskResult{
+			id:     id
+			result: Value(chunk)
+		}
+	}(id, stream.chunks, vm.task_results)
+	return Value(PromiseValue{
+		id: id
+	})
+}
+
+fn native_stream_is_closed(mut vm VM, args []Value) Value {
+	stream := vm.current_native_context[0] as StreamValue
+	is_closed := stream.chunks.closed
+	return Value(is_closed)
 }
 
 fn (mut vm VM) poll_tasks() {
@@ -1149,6 +1245,7 @@ fn (vm &VM) typeof(val Value) string {
 		EnumVariantValue { 'enum_variant' }
 		BoundMethodValue { 'function' }
 		PromiseValue { 'promise' }
+		StreamValue { 'stream' }
 	}
 }
 
@@ -1190,6 +1287,10 @@ fn (mut vm VM) import_module(path string) !Value {
 	}
 	if path == 'core/http2.vs' {
 		val := create_http2_module(mut vm)
+		return val
+	}
+	if path == 'core/http3.vs' {
+		val := create_http3_module(mut vm)
 		return val
 	}
 
