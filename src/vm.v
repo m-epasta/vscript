@@ -46,6 +46,9 @@ mut:
 	promises               map[int]&PromiseState
 	next_promise_id        int
 	current_native_context []Value
+	curl_multi_handle      &C.CURLM
+	active_transfers       map[voidptr]int     // easy_handle -> promise_id
+	transfer_bodies        map[voidptr]&string // easy_handle -> buffer pointer (on heap)
 }
 
 fn new_vm() VM {
@@ -86,13 +89,90 @@ fn new_vm() VM {
 			exception_handlers: []ExceptionHandler{cap: 16}
 			modules:            map[string]Value{}
 			task_results:       chan TaskResult{cap: 100}
+			curl_multi_handle:  C.curl_multi_init()
+			active_transfers:   map[voidptr]int{}
+			transfer_bodies:    map[voidptr]&string{}
 		}
 		vm.register_stdlib()
 		return vm
 	}
 }
 
+fn (mut vm VM) poll_curl_multi() {
+	if vm.active_transfers.len == 0 {
+		return
+	}
+
+	mut still_running := 0
+	C.curl_multi_perform(vm.curl_multi_handle, &still_running)
+
+	mut msgs_in_queue := 0
+	for {
+		msg := C.curl_multi_info_read(vm.curl_multi_handle, &msgs_in_queue)
+		if msg == 0 {
+			break
+		}
+
+		if msg.msg == curlmsg_done {
+			easy_handle := msg.easy_handle
+			id := vm.active_transfers[easy_handle] or { continue }
+
+			// Extract info
+			mut status := 0
+			C.curl_easy_getinfo(easy_handle, 2097154, &status)
+
+			body_ptr := vm.transfer_bodies[easy_handle] or { continue }
+			body := *body_ptr
+
+			mut resp_map := map[string]Value{}
+			resp_map['status'] = Value(f64(status))
+			resp_map['body'] = Value(body)
+			resp_map['ok'] = Value(status >= 200 && status < 300)
+			resp_map['protocol'] = Value('HTTP/2 (Multiplexed)')
+
+			// Resolution
+			if mut state := vm.promises[id] {
+				// Attach .json() helper
+				vm.define_native_in_map_with_context(mut resp_map, 'json', 0, [
+					Value(body),
+				], fn (mut v VM, a []Value) Value {
+					body_str := value_to_string(v.current_native_context[0])
+					raw := json2.decode[json2.Any](body_str) or {
+						return Value(EnumVariantValue{
+							enum_name: 'Result'
+							variant:   'err'
+							values:    [Value('Failed to parse JSON')]
+						})
+					}
+					return Value(EnumVariantValue{
+						enum_name: 'Result'
+						variant:   'ok'
+						values:    [json_to_value(raw)]
+					})
+				})
+
+				state.value = Value(EnumVariantValue{
+					enum_name: 'Result'
+					variant:   'ok'
+					values:    [Value(MapValue{
+						items: resp_map
+					})]
+				})
+				state.status = .resolved
+			}
+
+			// Cleanup
+			C.curl_multi_remove_handle(vm.curl_multi_handle, easy_handle)
+			C.curl_easy_cleanup(easy_handle)
+			vm.active_transfers.delete(easy_handle)
+			vm.transfer_bodies.delete(easy_handle)
+			// Note: body_ptr cleanup handled by V's GC or manual if we used unsafe alloc
+		}
+	}
+}
+
 fn (mut vm VM) poll_tasks() {
+	vm.poll_curl_multi()
 	for {
 		select {
 			res := <-vm.task_results {
@@ -1106,6 +1186,10 @@ fn (mut vm VM) import_module(path string) !Value {
 	}
 	if path == 'core/http.vs' {
 		val := create_http_module(mut vm)
+		return val
+	}
+	if path == 'core/http2.vs' {
+		val := create_http2_module(mut vm)
 		return val
 	}
 
