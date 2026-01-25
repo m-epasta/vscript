@@ -45,6 +45,9 @@ fn (c &Chunk) disassemble_instruction(offset int) int {
 	instruction := unsafe { OpCode(c.code[offset]) }
 
 	return match instruction {
+		.op_import {
+			c.constant_instruction('OP_IMPORT', offset)
+		}
 		.op_constant {
 			c.constant_instruction('OP_CONSTANT', offset)
 		}

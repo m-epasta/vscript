@@ -142,6 +142,12 @@ type Stmt = ExprStmt
 	| EnumStmt
 	| EmptyStmt
 	| TryStmt
+	| ImportStmt
+
+struct ImportStmt {
+	path  Token
+	alias ?Token
+}
 
 struct TryStmt {
 	try_body   Stmt

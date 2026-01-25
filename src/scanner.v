@@ -193,6 +193,7 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'match' { .match_keyword }
 		'try' { .try_keyword }
 		'catch' { .catch_keyword }
+		'import' { .import_keyword }
 		else { .identifier }
 	}
 }

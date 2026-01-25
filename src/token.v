@@ -52,6 +52,7 @@ enum TokenType {
 	match_keyword
 	try_keyword
 	catch_keyword
+	import_keyword
 
 	// Special
 	at_bracket // @[

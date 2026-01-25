@@ -67,6 +67,9 @@ enum OpCode {
 	// Exception Handling
 	op_exception_push
 	op_exception_pop
+
+	// Modules
+	op_import
 }
 
 fn (op OpCode) str() string {
@@ -114,5 +117,6 @@ fn (op OpCode) str() string {
 		.op_pop_scope { 'OP_POP_SCOPE' }
 		.op_exception_push { 'OP_EXCEPTION_PUSH' }
 		.op_exception_pop { 'OP_EXCEPTION_POP' }
+		.op_import { 'OP_IMPORT' }
 	}
 }

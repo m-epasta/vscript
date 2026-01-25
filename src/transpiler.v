@@ -191,6 +191,23 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 		StructStmt, EnumStmt {
 			// TODO: Implement JS transpilation for static data
 		}
+		ImportStmt {
+			// Generate CommonJS require or ES import
+			// Importing 'path' as 'alias'
+			t.indent()
+			if alias := stmt.alias {
+				t.output.write_string('const ')
+				t.output.write_string(alias.lexeme)
+				t.output.write_string(' = ')
+			} else {
+				// No alias, side effect only? Or default name?
+				// JS require is usually const X = require...
+				// For now just require
+			}
+			t.output.write_string('require("')
+			t.output.write_string(stmt.path.literal)
+			t.output.write_string('");\n')
+		}
 	}
 }
 

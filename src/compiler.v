@@ -145,6 +145,60 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			// 5. End of try-catch
 			c.patch_jump(success_jump)
 		}
+		ImportStmt {
+			path_const := c.make_constant(Value(stmt.path.literal))
+			c.emit_bytes(u8(OpCode.op_import), path_const)
+
+			// The VM leaves the module object (MapValue or ModuleValue) on the stack
+			// We need to store it in a variable
+
+			mut var_token := Token{}
+			if alias := stmt.alias {
+				var_token = alias
+			} else {
+				// Derive variable name from path if no alias
+				// e.g. "std/math.vs" -> "math"
+				// e.g. "utils" -> "utils"
+				path := stmt.path.literal
+				// Simple basename logic
+				unsafe {
+					parts := path.split('/')
+					filename := parts[parts.len - 1]
+					state_name := filename.replace('.vs', '')
+					// We need to synthesize a token for the variable name
+					var_token = Token{
+						type_:  .identifier
+						lexeme: state_name
+						line:   stmt.path.line
+					}
+				}
+			}
+
+			// Define variable
+			// Note: This puts it in local or global scope depending on context
+			c.named_variable(var_token, true)!
+			c.emit_byte(u8(OpCode.op_pop)) // named_variable emits get/set but leaves value on stack?
+			// Wait, declaration logic:
+			// var declaration: compiles initializer (value on stack), then defines variable.
+			// named_variable is for expressions (get/set).
+			// We need declaration logic.
+
+			// For globals: op_set_global leaves value on stack, so we need pop if it's a stmt?
+			// But define_variable (helper?) usually consumes.
+			// Let's check var_declaration logic.
+			// It emits initializer, then `c.define_variable(global_idx)`.
+			// If local, it just marks it initialized.
+			// We effectively have the initializer (the module) on stack.
+
+			if c.scope_depth > 0 {
+				c.add_local(var_token.lexeme)
+				// c.mark_initialized() - implicit in add_local
+			} else {
+				global_const := c.make_constant(Value(var_token.lexeme))
+				c.emit_bytes(u8(OpCode.op_set_global), global_const)
+				c.emit_byte(u8(OpCode.op_pop)) // Pop the module value (set_global leaves it)
+			}
+		}
 		ForStmt {
 			c.begin_scope()
 

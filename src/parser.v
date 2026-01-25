@@ -311,6 +311,9 @@ fn (mut p Parser) statement() !Stmt {
 	if p.match_([.try_keyword]) {
 		return p.try_statement()
 	}
+	if p.match_([.import_keyword]) {
+		return p.import_statement()
+	}
 	if p.match_([.return_keyword]) {
 		return p.return_statement()
 	}
@@ -421,6 +424,62 @@ fn (mut p Parser) try_statement() !Stmt {
 		try_body:   try_body
 		catch_var:  catch_var
 		catch_body: catch_body
+	})
+}
+
+fn (mut p Parser) import_statement() !Stmt {
+	// 'import' is already consumed
+
+	mut path_token := Token{} // Placeholder
+
+	if p.match_([.string]) {
+		// String literal path: import "foo/bar.vs"
+		path_token = p.previous()
+	} else if p.match_([.identifier]) {
+		// Identifier path: import foo:bar
+		// Logic: parse identifiers joined by colons
+		mut parts := [p.previous().lexeme]
+		for p.match_([.colon]) {
+			part := p.consume(.identifier, 'Expect identifier after : in import path')!
+			parts << part.lexeme
+		}
+		// Convert identifiers to path with .vs extension
+		// e.g. std:math -> std/math.vs
+		path_str := parts.join('/') + '.vs'
+
+		// Create synthetic token for the path
+		path_token = Token{
+			type_:   .string
+			lexeme:  '"${path_str}"'
+			literal: path_str
+			line:    p.previous().line
+		}
+	} else {
+		return error('Expect string or identifier execution path after import')
+	}
+
+	// Optional alias: import ... as alias
+	mut alias := ?Token(none)
+	if p.match_([.identifier]) { // "as" is not a keyword, checked as identifier
+		if p.previous().lexeme == 'as' {
+			alias_token := p.consume(.identifier, 'Expect alias name after as')!
+			alias = alias_token
+		} else {
+			// Backtrack? No, "as" is contextual. If next is identifier but not 'as', it's an error?
+			// Unlike SQL, vscript doesn't have implicit alias without 'as'.
+			// But wait, if they write `import "foo" bar`, that's invalid syntax here.
+			// Currently we only support explicit `as`.
+			// If we consumed an identifier that is NOT 'as', that's an error in parsing?
+			// Actually `match_` consumes. If it wasn't 'as', we effectively consumed an unexpected identifier.
+			return error("Expect 'as' for import alias")
+		}
+	}
+
+	p.consume(.semicolon, 'Expect ; after import')!
+
+	return Stmt(ImportStmt{
+		path:  path_token
+		alias: alias
 	})
 }
 

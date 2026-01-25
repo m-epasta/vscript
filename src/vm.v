@@ -2,6 +2,7 @@
 module main
 
 import math
+import os
 
 const stack_max = 256
 
@@ -36,6 +37,7 @@ mut:
 	is_test_mode       bool
 	exception_handlers []ExceptionHandler
 	recovering         bool
+	modules            map[string]Value
 }
 
 fn new_vm() VM {
@@ -74,6 +76,7 @@ fn new_vm() VM {
 			open_upvalues:      []&Upvalue{}
 			is_test_mode:       false
 			exception_handlers: []ExceptionHandler{cap: 16}
+			modules:            map[string]Value{}
 		}
 		vm.register_stdlib()
 		return vm
@@ -745,6 +748,33 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					vm.exception_handlers.pop()
 				}
 			}
+			.op_import {
+				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+				path_val := vm.frames[f_idx].closure.function.chunk.constants[byte]
+				if path_val is string {
+					path := path_val as string
+					if cached := vm.modules[path] {
+						vm.push(cached)
+					} else {
+						// Load and execute module
+						mod_result := vm.import_module(path) or {
+							if vm.runtime_error('Import failed: ${err}') {
+								continue
+							}
+							return .runtime_error
+						}
+						// Cache result
+						vm.modules[path] = mod_result
+						vm.push(mod_result)
+					}
+				} else {
+					if vm.runtime_error('Import path must be a string') {
+						continue
+					}
+					return .runtime_error
+				}
+			}
 		}
 	}
 	return .ok
@@ -973,6 +1003,77 @@ fn (mut vm VM) runtime_error(message string) bool {
 
 	eprintln('Runtime error: ${message}')
 	return false
+}
+
+fn (mut vm VM) import_module(path string) !Value {
+	// 1. Read source
+	// TODO: Handle relative paths more robustly (relative to CWD for now)
+	if !os.exists(path) {
+		return error('File not found: ${path}')
+	}
+	source := os.read_file(path) or { return error('Could not read file') }
+
+	// 2. Compile
+	mut scanner := new_scanner(source)
+	tokens := scanner.scan_tokens()
+
+	// Check for scan errors? scanner stores them?
+	// For now assume valid tokens or parser fails.
+
+	mut parser := new_parser(tokens, false) // Modules not in test mode by default
+	stmts := parser.parse() or { return error('Parse error in module ${path}: ${err}') }
+
+	mut compiler := new_compiler(none, .type_script)
+	function := compiler.compile(stmts) or { return error('Compile error in module ${path}') }
+
+	closure := ClosureValue{
+		function: function
+		upvalues: []&Upvalue{}
+	}
+
+	// 3. Prepare execution environment (Swap Globals)
+	// We want the module to populate its own globals, which we then export.
+	old_globals := vm.globals.clone()
+	vm.globals = map[string]Value{}
+	// Note: We might want to inject standard library or built-ins here if they are globals.
+	// But currently stdlib is registered in `vm.globals`.
+	// If we clear globals, we lose stdlib functions like 'print', 'math', etc.
+	// We should probably start with a fresh map + stdlib?
+	// Efficient way: shallow copy or re-register?
+	// Let's re-register stdlib for now.
+	vm.register_stdlib()
+
+	// 4. Execute
+	vm.push(Value(closure))
+	if !vm.call_closure(closure, 0) {
+		// Recovery logic handles runtime error reporting, but here we need to clean up globals
+		vm.globals = old_globals.clone()
+		return error('Runtime error executing module ${path}')
+	}
+
+	// Run VM recursively/re-entrantly
+	// We are already inside 'run', so we call run again for the new frame
+	current_depth := vm.frame_count - 1 // The frame we just pushed
+	res := vm.run(current_depth)
+
+	match res {
+		.ok {
+			// 5. Collect exports
+			exports := vm.globals.clone()
+
+			// 6. Restore Globals
+			vm.globals = old_globals.clone()
+
+			// Wrap in MapValue
+			return Value(MapValue{
+				items: exports
+			})
+		}
+		else {
+			vm.globals = old_globals.clone()
+			return error('Runtime execution failed in module ${path}')
+		}
+	}
 }
 
 // Run all functions marked with @[test]
