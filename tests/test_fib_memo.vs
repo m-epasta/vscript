@@ -12,7 +12,7 @@ fn fib(n) {
 var result = fib(35);
 var end = clock();
 
-println("Fib(35) = " + to_string(result));
+println("fib(35) = " + to_string(result));
 println("Time taken: " + to_string(end - start) + "s");
 
 // Also test @[memoize] on a method

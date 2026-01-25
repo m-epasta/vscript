@@ -747,4 +747,18 @@ fn (mut vm VM) register_stdlib() {
 	vm.define_native('json_encode', 1, native_json_encode)
 	vm.define_native('json_decode', 1, native_json_decode)
 	vm.define_native('optimize', 2, native_optimize)
+
+	// Built-in Types
+
+	// Result
+	vm.globals['Result'] = EnumValue{
+		name:     'Result'
+		variants: ['ok', 'err']
+	}
+	
+	// Option
+	vm.globals['Option'] = EnumValue{
+		name:     'Option'
+		variants: ['some', 'none']
+	}
 }

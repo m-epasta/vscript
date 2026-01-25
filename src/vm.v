@@ -324,6 +324,21 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				vm.stack_top = slots
 				vm.push(result)
 			}
+			.op_pop_scope {
+				count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				vm.frames[f_idx].ip++
+
+				// Preserve result
+				result := vm.pop()
+
+				// Pop scope locals
+				for _ in 0 .. int(count) {
+					vm.pop()
+				}
+
+				// Restore result
+				vm.push(result)
+			}
 			.op_duplicate {
 				vm.push(vm.peek(0))
 			}
@@ -341,14 +356,13 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 
 				target := vm.pop()
 				if target is EnumVariantValue {
-					// Match if variant name matches, and enum name matches IF it was specified
 					if target.variant == variant_name
 						&& (enum_name == '' || target.enum_name == enum_name) {
-						vm.push(Value(true))
 						// Push data for binding
 						for val in target.values {
 							vm.push(val)
 						}
+						vm.push(Value(true))
 					} else {
 						vm.push(Value(false))
 					}
@@ -525,6 +539,62 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 							})
 						} else {
 							vm.runtime_error('Undefined enum variant "${name}"')
+							return .runtime_error
+						}
+					} else if instance is EnumVariantValue {
+						if name == 'unwrap' {
+							vm.push(Value(NativeFunctionValue{
+								name:  'unwrap'
+								arity: 0
+								func:  fn [instance] (mut vm VM, args []Value) Value {
+									if instance.variant in ['ok', 'some'] {
+										if instance.values.len > 0 {
+											return instance.values[0]
+										}
+										return Value(NilValue{})
+									}
+									vm.runtime_error('Panic: called unwrap on ${instance.enum_name}.${instance.variant}')
+									return Value(NilValue{})
+								}
+							}))
+						} else if name == 'expect' {
+							vm.push(Value(NativeFunctionValue{
+								name:  'expect'
+								arity: 1
+								func:  fn [instance] (mut vm VM, args []Value) Value {
+									if instance.variant in ['ok', 'some'] {
+										if instance.values.len > 0 {
+											return instance.values[0]
+										}
+										return Value(NilValue{})
+									}
+									msg := if args[0] is string {
+										args[0] as string
+									} else {
+										'Expectation failed'
+									}
+									vm.runtime_error('Panic: ${msg}')
+									return Value(NilValue{})
+								}
+							}))
+						} else if name == 'is_ok' || name == 'is_some' {
+							vm.push(Value(NativeFunctionValue{
+								name:  'is_ok'
+								arity: 0
+								func:  fn [instance] (mut vm VM, args []Value) Value {
+									return Value(instance.variant in ['ok', 'some'])
+								}
+							}))
+						} else if name == 'is_err' || name == 'is_none' {
+							vm.push(Value(NativeFunctionValue{
+								name:  'is_err'
+								arity: 0
+								func:  fn [instance] (mut vm VM, args []Value) Value {
+									return Value(instance.variant in ['err', 'error', 'none'])
+								}
+							}))
+						} else {
+							vm.runtime_error('Undefined property "${name}" on enum variant')
 							return .runtime_error
 						}
 					} else {

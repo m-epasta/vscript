@@ -48,7 +48,7 @@ fn new_compiler(enclosing ?&Compiler, type_ FunctionType) Compiler {
 			upvalues:      []UpvalueMetadata{cap: 64}
 			chunk:         chunk
 			locals:        []Local{len: 256}
-			local_count:   0
+			local_count:   1 // Reserve slot 0 for script/receiver
 			scope_depth:   0
 			class_type:    if enclosing != none { enclosing.class_type } else { .type_none }
 		}
@@ -390,18 +390,80 @@ fn (mut c Compiler) compile_match(expr MatchExpr) ! {
 	mut end_jumps := []int{}
 
 	for arm in expr.arms {
-		// Pattern matching logic (simplified for now: push pattern and call op_equal)
-		// This will be replaced by specialized pattern opcodes
+		c.emit_byte(u8(OpCode.op_duplicate))
+
+		mut next_arm_jump := -1
+
+		// Pattern matching logic
 		match arm.pattern {
 			LiteralPattern {
-				c.emit_byte(u8(OpCode.op_constant)) // We need op_duplicate really
-				// ... implementation details ...
+				c.compile_expr(arm.pattern.value)!
+				c.emit_byte(u8(OpCode.op_equal))
+				next_arm_jump = c.emit_jump(u8(OpCode.op_jump_if_false))
+				c.emit_byte(u8(OpCode.op_pop)) // Pop result of equal
 			}
-			else {
-				// Stub
+			IdentifierPattern {
+				// Catch-all: always true, but we bind the variable
+				c.begin_scope()
+				c.add_local(arm.pattern.name.lexeme)
+				// We don't jump, we just execute
+			}
+			VariantPattern {
+				// Resolve names
+				enum_name := if v := arm.pattern.enum_name { v.lexeme } else { '' }
+				variant_name := arm.pattern.variant.lexeme
+
+				e_const := c.make_constant(Value(enum_name))
+				v_const := c.make_constant(Value(variant_name))
+
+				c.emit_bytes(u8(OpCode.op_match_variant), e_const)
+				c.emit_byte(v_const)
+
+				next_arm_jump = c.emit_jump(u8(OpCode.op_jump_if_false))
+				c.emit_byte(u8(OpCode.op_pop)) // Pop 'true'
+
+				// Bind variables in standard order (VM pushed val0, val1...)
+				// Stack: target, val0, val1... (target is preserved from compile_expr)
+				c.begin_scope()
+				c.add_local('_match_target') // Dummy for target
+				for i := 0; i < arm.pattern.params.len; i++ {
+					c.add_local(arm.pattern.params[i].lexeme)
+				}
 			}
 		}
-		// ... more logic ...
+		// Body
+		c.compile_expr(arm.body)!
+
+		// Cleanup logic
+		match arm.pattern {
+			IdentifierPattern, VariantPattern {
+				// Pop locals but keep result
+				mut count := 0
+				current_depth := c.scope_depth
+				mut i := c.local_count
+				for i > 0 && c.locals[i - 1].depth == current_depth {
+					count++
+					i--
+				}
+
+				c.emit_bytes(u8(OpCode.op_pop_scope), u8(count))
+
+				// Manually reduce local_count in compiler
+				c.local_count -= count
+				c.scope_depth--
+			}
+			LiteralPattern {
+				// Pop target (1 item) keeping result
+				c.emit_bytes(u8(OpCode.op_pop_scope), 1)
+			}
+		}
+
+		end_jumps << c.emit_jump(u8(OpCode.op_jump))
+
+		if next_arm_jump != -1 {
+			c.patch_jump(next_arm_jump)
+			c.emit_byte(u8(OpCode.op_pop)) // Pop 'false' (condition)
+		}
 	}
 
 	// Default case (pop target)
@@ -450,10 +512,8 @@ fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, t
 
 	// Reserve slot 0 for the function itself or 'this'
 	compiler.locals[0] = Local{
-		name:  if type_ != .type_script && c.class_type != .type_none { 'this' } else { '' }
-		depth: 0
+		name: if type_ != .type_script && c.class_type != .type_none { 'this' } else { '' }
 	}
-	compiler.local_count++
 
 	for param in params {
 		compiler.add_local(param.lexeme)

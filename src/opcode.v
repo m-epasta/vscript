@@ -62,6 +62,7 @@ enum OpCode {
 	// Pattern Matching
 	op_duplicate
 	op_match_variant
+	op_pop_scope
 }
 
 fn (op OpCode) str() string {
@@ -106,5 +107,6 @@ fn (op OpCode) str() string {
 		.op_enum { 'OP_ENUM' }
 		.op_duplicate { 'OP_DUPLICATE' }
 		.op_match_variant { 'OP_MATCH_VARIANT' }
+		.op_pop_scope { 'OP_POP_SCOPE' }
 	}
 }
