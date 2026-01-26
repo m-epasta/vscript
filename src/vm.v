@@ -1269,6 +1269,10 @@ fn (mut vm VM) runtime_error(message string) bool {
 fn (mut vm VM) import_module(path string) !Value {
 	// 0. Intercept Native Modules
 
+	if path == 'core/fetch.vs' {
+		val := create_fetch_module(mut vm)
+		return val
+	}
 	if path == 'core/fs.vs' {
 		val := create_fs_module(mut vm)
 		return val

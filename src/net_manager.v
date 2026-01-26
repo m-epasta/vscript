@@ -11,6 +11,7 @@ mut:
 	stream_queues       map[voidptr]chan string // easy_handle -> chunk channel
 	stream_headers_done map[voidptr]bool        // easy_handle -> bool
 	ws_queues           map[voidptr]chan string // easy_handle -> msg channel
+	response_headers    map[voidptr]map[string]string
 	curl_share_handle   &C.CURLSH
 
 	// Server state
@@ -29,6 +30,7 @@ fn new_network_manager() NetworkManager {
 			stream_queues:       map[voidptr]chan string{}
 			stream_headers_done: map[voidptr]bool{}
 			ws_queues:           map[voidptr]chan string{}
+			response_headers:    map[voidptr]map[string]string{}
 			curl_share_handle:   C.curl_share_init()
 			server_running:      false
 			server_listener:     nil
@@ -181,6 +183,16 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 						resp_map['ok'] = Value(status >= 200 && status < 300)
 						resp_map['protocol'] = Value('Unified')
 
+						mut header_map := map[string]Value{}
+						if headers := nm.response_headers[easy_handle] {
+							for k, v in headers {
+								header_map[k] = Value(v)
+							}
+						}
+						resp_map['headers'] = Value(MapValue{
+							items: header_map
+						})
+
 						vm.define_native_in_map_with_context(mut resp_map, 'json', 0,
 							[
 							Value(body),
@@ -193,13 +205,23 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 									values:    [Value('Failed to parse JSON')]
 								})
 							}
-							return Value(EnumVariantValue{
+							val := Value(EnumVariantValue{
 								enum_name: 'Result'
 								variant:   'ok'
 								values:    [json_to_value(raw)]
 							})
+							return create_resolved_promise(mut v, val)
 						})
 
+						vm.define_native_in_map_with_context(mut resp_map, 'text', 0,
+							[
+							Value(body),
+						], fn (mut v VM, a []Value) Value {
+							// Return promise that resolves immediately since body is ready
+							// TODO: Make this cleaner, for now simpler to just return string?
+							// Fetch spec says text() returns promise.
+							return create_resolved_promise(mut v, v.current_native_context[0])
+						})
 						state.value = Value(EnumVariantValue{
 							enum_name: 'Result'
 							variant:   'ok'
@@ -228,6 +250,7 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 				nm.stream_queues.delete(easy_handle)
 				nm.ws_queues.delete(easy_handle)
 				nm.stream_headers_done.delete(easy_handle)
+				nm.response_headers.delete(easy_handle)
 			}
 		}
 	}

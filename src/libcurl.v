@@ -141,6 +141,26 @@ fn header_callback(data &char, size usize, nmemb usize, userdata voidptr) usize 
 		// The end of headers is an empty line (just \r\n or \n)
 		if line == '\r\n' || line == '\n' {
 			ctx.vm.net_manager.stream_headers_done[ctx.easy_handle] = true
+		} else {
+			// Parse "Key: Value"
+			// Only valid headers contain a colon
+			if line.contains(':') {
+				parts := line.split_nth(':', 2)
+				if parts.len == 2 {
+					key := parts[0].trim_space()
+					val := parts[1].trim_space()
+
+					// Initialize map if needed (V maps in structs need explicit initialization if nil?
+					// Maps are reference types, so zero value is nil-ish but V handles it usually.
+					// Let's rely on auto-init or check key existence)
+					// Actually, simpler to just set it.
+					// We need to make sure the map exists for this handle.
+					if ctx.easy_handle !in ctx.vm.net_manager.response_headers {
+						ctx.vm.net_manager.response_headers[ctx.easy_handle] = map[string]string{}
+					}
+					ctx.vm.net_manager.response_headers[ctx.easy_handle][key] = val
+				}
+			}
 		}
 
 		return len
