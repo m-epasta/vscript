@@ -113,12 +113,12 @@ fn write_callback(data &char, size usize, nmemb usize, userdata voidptr) usize {
 		h := ctx.easy_handle
 
 		// If streaming is enabled for this handle, push to queue
-		if q := v.stream_queues[h] {
+		if q := v.net_manager.stream_queues[h] {
 			q <- chunk
 		}
 
 		// Always append to buffer if one exists
-		if body_s_ptr := v.transfer_bodies[h] {
+		if body_s_ptr := v.net_manager.transfer_bodies[h] {
 			mut s_ref := &string(body_s_ptr)
 			*s_ref += chunk
 		}
@@ -140,7 +140,7 @@ fn header_callback(data &char, size usize, nmemb usize, userdata voidptr) usize 
 		// V's net.http uses "\r\n" as delimiter
 		// The end of headers is an empty line (just \r\n or \n)
 		if line == '\r\n' || line == '\n' {
-			ctx.vm.stream_headers_done[ctx.easy_handle] = true
+			ctx.vm.net_manager.stream_headers_done[ctx.easy_handle] = true
 		}
 
 		return len

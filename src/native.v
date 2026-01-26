@@ -489,6 +489,8 @@ fn native_type(mut vm VM, args []Value) Value {
 		EnumVariantValue { Value('enum_variant') }
 		BoundMethodValue { Value('function') }
 		PromiseValue { Value('promise') }
+		RequestValue { Value('request') }
+		ResponseValue { Value('response') }
 		SocketValue { Value('socket') }
 		StreamValue { Value('stream') }
 	}
@@ -755,7 +757,7 @@ fn (mut vm VM) register_stdlib() {
 	vm.define_native('print', -1, native_print)
 	vm.define_native('println', -1, native_println)
 	vm.define_native('eprint', -1, native_eprint)
-	vm.define_native('type', 1, native_type)
+	vm.define_native('typeof', 1, native_type)
 	vm.define_native('to_string', 1, native_to_string)
 	vm.define_native('to_number', 1, native_to_number)
 	vm.define_native('is_empty', 1, native_is_empty)

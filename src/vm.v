@@ -1,7 +1,7 @@
+import net
 import math
 import os
 import time
-import x.json2
 
 const stack_max = 256
 
@@ -35,7 +35,6 @@ mut:
 	frames                 []CallFrame
 	frame_count            int
 	stack                  []Value
-	stack_top              int
 	globals                map[string]Value
 	open_upvalues          []&Upvalue
 	is_test_mode           bool
@@ -46,13 +45,7 @@ mut:
 	promises               map[int]&PromiseState
 	next_promise_id        int
 	current_native_context []Value
-	curl_multi_handle      &C.CURLM
-	active_transfers       map[voidptr]int         // easy_handle -> promise_id
-	transfer_bodies        map[voidptr]&string     // easy_handle -> buffer pointer (on heap)
-	stream_queues          map[voidptr]chan string // easy_handle -> chunk channel
-	stream_headers_done    map[voidptr]bool        // easy_handle -> bool
-	ws_queues              map[voidptr]chan string // easy_handle -> msg channel
-	curl_share_handle      &C.CURLSH
+	net_manager            NetworkManager
 }
 
 fn new_vm() VM {
@@ -83,219 +76,20 @@ fn new_vm() VM {
 		}
 
 		mut vm := VM{
-			frames:              frames
-			frame_count:         0
-			stack:               []Value{len: stack_max, init: NilValue{}}
-			stack_top:           0
-			globals:             map[string]Value{}
-			open_upvalues:       []&Upvalue{}
-			is_test_mode:        false
-			exception_handlers:  []ExceptionHandler{cap: 16}
-			modules:             map[string]Value{}
-			task_results:        chan TaskResult{cap: 100}
-			curl_multi_handle:   C.curl_multi_init()
-			active_transfers:    map[voidptr]int{}
-			transfer_bodies:     map[voidptr]&string{}
-			stream_queues:       map[voidptr]chan string{}
-			stream_headers_done: map[voidptr]bool{}
-			ws_queues:           map[voidptr]chan string{}
-			curl_share_handle:   C.curl_share_init()
+			frames:             frames
+			frame_count:        0
+			stack:              []Value{cap: stack_max}
+			globals:            map[string]Value{}
+			open_upvalues:      []&Upvalue{}
+			is_test_mode:       false
+			exception_handlers: []ExceptionHandler{cap: 16}
+			modules:            map[string]Value{}
+			task_results:       chan TaskResult{cap: 100}
+			net_manager:        new_network_manager()
 		}
-
-		// Configure global share handle
-		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_cookie))
-		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_dns))
-		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_ssl_session))
-		C.curl_share_setopt(vm.curl_share_handle, curlshopt_share, voidptr(curl_lock_data_connect))
 
 		vm.register_stdlib()
 		return vm
-	}
-}
-
-fn (mut vm VM) poll_curl_multi() {
-	if vm.active_transfers.len == 0 {
-		return
-	}
-
-	mut still_running := 0
-	C.curl_multi_poll(vm.curl_multi_handle, 0, 0, 1, &still_running)
-	C.curl_multi_perform(vm.curl_multi_handle, &still_running)
-
-	// Phase 1: Early Resolution (Streaming or WebSocket Handshake)
-	for handle, id in vm.active_transfers {
-		if vm.stream_headers_done[handle] {
-			if mut state := vm.promises[id] {
-				if state.status == .pending {
-					mut status := 0
-					C.curl_easy_getinfo(handle, 2097154, &status)
-
-					// Detect WebSocket via status 101 or protocol
-					if status == 101 {
-						msg_chan := chan string{cap: 100}
-						vm.ws_queues[handle] = msg_chan
-
-						sock_obj := SocketValue{
-							handle:   handle
-							messages: msg_chan
-						}
-
-						mut sock_methods := map[string]Value{}
-						vm.define_native_in_map_with_context(mut sock_methods, 'send',
-							1, [Value(sock_obj)], native_socket_send)
-						vm.define_native_in_map_with_context(mut sock_methods, 'recv',
-							0, [Value(sock_obj)], native_socket_recv)
-						vm.define_native_in_map_with_context(mut sock_methods, 'close',
-							0, [Value(sock_obj)], native_socket_close)
-
-						state.value = Value(EnumVariantValue{
-							enum_name: 'Result'
-							variant:   'ok'
-							values:    [
-								Value(MapValue{
-									items: sock_methods
-								}),
-							]
-						})
-						state.status = .resolved
-						continue
-					}
-
-					if q := vm.stream_queues[handle] {
-						mut resp_map := map[string]Value{}
-						resp_map['status'] = Value(f64(status))
-						resp_map['ok'] = Value(status >= 200 && status < 300)
-						resp_map['protocol'] = Value('Elite Unified (Streaming)')
-
-						stream_obj := StreamValue{
-							chunks: q
-						}
-
-						mut stream_res := map[string]Value{}
-						vm.define_native_in_map_with_context(mut stream_res, 'read', 0,
-							[Value(stream_obj)], native_stream_read)
-						vm.define_native_in_map_with_context(mut stream_res, 'is_closed',
-							0, [Value(stream_obj)], native_stream_is_closed)
-
-						resp_map['body'] = Value(MapValue{
-							items: stream_res
-						})
-
-						state.value = Value(EnumVariantValue{
-							enum_name: 'Result'
-							variant:   'ok'
-							values:    [
-								Value(MapValue{
-									items: resp_map
-								}),
-							]
-						})
-						state.status = .resolved
-					}
-				}
-			}
-		}
-	}
-
-	// Phase 1.5: Receive WebSocket Frames
-	for handle, q in vm.ws_queues {
-		// Attempt to receive frames
-		mut buffer := []u8{len: 4096}
-		mut received := usize(0)
-		mut meta := &C.curl_ws_frame(unsafe { nil })
-
-		for {
-			res := unsafe { C.curl_ws_recv(handle, buffer.data, 4096, &received, &meta) }
-			if res != 0 {
-				break
-			}
-			if received == 0 {
-				break
-			}
-
-			// Process frame
-			unsafe {
-				chunk := (&char(buffer.data)).vstring_with_len(int(received))
-				q <- chunk
-			}
-			// If no more data available immediately, stop internal loop
-			if unsafe { meta != 0 && meta.bytesleft == 0 } {
-				break
-			}
-		}
-	}
-
-	// Phase 2: Final Resolution
-	mut msgs_in_queue := 0
-	for {
-		msg := C.curl_multi_info_read(vm.curl_multi_handle, &msgs_in_queue)
-		if msg == 0 {
-			break
-		}
-
-		if msg.msg == curlmsg_done {
-			easy_handle := msg.easy_handle
-			id := vm.active_transfers[easy_handle] or { continue }
-
-			if mut state := vm.promises[id] {
-				if state.status == .pending {
-					mut status := 0
-					C.curl_easy_getinfo(easy_handle, 2097154, &status)
-
-					body_ptr := vm.transfer_bodies[easy_handle] or { continue }
-					body := *body_ptr
-
-					mut resp_map := map[string]Value{}
-					resp_map['status'] = Value(f64(status))
-					resp_map['body'] = Value(body)
-					resp_map['ok'] = Value(status >= 200 && status < 300)
-					resp_map['protocol'] = Value('Elite Unified')
-
-					vm.define_native_in_map_with_context(mut resp_map, 'json', 0, [
-						Value(body),
-					], fn (mut v VM, a []Value) Value {
-						body_str := value_to_string(v.current_native_context[0])
-						raw := json2.decode[json2.Any](body_str) or {
-							return Value(EnumVariantValue{
-								enum_name: 'Result'
-								variant:   'err'
-								values:    [Value('Failed to parse JSON')]
-							})
-						}
-						return Value(EnumVariantValue{
-							enum_name: 'Result'
-							variant:   'ok'
-							values:    [json_to_value(raw)]
-						})
-					})
-
-					state.value = Value(EnumVariantValue{
-						enum_name: 'Result'
-						variant:   'ok'
-						values:    [Value(MapValue{
-							items: resp_map
-						})]
-					})
-					state.status = .resolved
-				}
-			}
-
-			if q := vm.stream_queues[easy_handle] {
-				q.close()
-			}
-			if q := vm.ws_queues[easy_handle] {
-				q.close()
-			}
-
-			// Cleanup
-			C.curl_multi_remove_handle(vm.curl_multi_handle, easy_handle)
-			C.curl_easy_cleanup(easy_handle)
-			vm.active_transfers.delete(easy_handle)
-			vm.transfer_bodies.delete(easy_handle)
-			vm.stream_queues.delete(easy_handle)
-			vm.ws_queues.delete(easy_handle)
-			vm.stream_headers_done.delete(easy_handle)
-		}
 	}
 }
 
@@ -381,42 +175,49 @@ fn native_socket_close(mut vm VM, args []Value) Value {
 	return Value(true)
 }
 
+fn (mut vm VM) poll_server() {
+	// Handled by manual poll loop in vscript or TaskResult system
+}
+
+fn native_response_send(mut vm VM, args []Value) Value {
+	resp := vm.current_native_context[0] as ResponseValue
+	data := value_to_string(args[0])
+
+	mut conn := unsafe { &net.TcpConn(resp.handle) }
+
+	header := 'HTTP/1.1 ${resp.status} OK\r\nContent-Length: ${data.len}\r\nConnection: close\r\n\r\n'
+	conn.write_string(header) or {}
+	conn.write_string(data) or {}
+	conn.close() or {}
+
+	return Value(true)
+}
+
+fn native_response_json(mut vm VM, args []Value) Value {
+	resp := vm.current_native_context[0] as ResponseValue
+	// For high throughput, we'll use value_to_string which already generates JSON-like maps/arrays
+	json_str := value_to_string(args[0])
+
+	mut conn := unsafe { &net.TcpConn(resp.handle) }
+
+	header := 'HTTP/1.1 ${resp.status} OK\r\nContent-Type: application/json\r\nContent-Length: ${json_str.len}\r\nConnection: close\r\n\r\n'
+	conn.write_string(header) or {}
+	conn.write_string(json_str) or {}
+	conn.close() or {}
+
+	return Value(true)
+}
+
 fn (mut vm VM) poll_tasks() {
-	vm.poll_curl_multi()
+	vm.net_manager.poll(mut vm)
+
+	// 2. Check for other task results
 	for {
 		select {
 			res := <-vm.task_results {
 				if mut state := vm.promises[res.id] {
-					mut final_res := res.result
-					// If result is Result.ok with a Response map, attach helper
-					if final_res is EnumVariantValue {
-						ev := final_res as EnumVariantValue
-						if ev.variant == 'ok' && ev.values.len > 0 && ev.values[0] is MapValue {
-							mut map_val := ev.values[0] as MapValue
-							if body := map_val.items['body'] {
-								vm.define_native_in_map_with_context(mut map_val.items,
-									'json', 0, [body], fn (mut v VM, a []Value) Value {
-									body_str := value_to_string(v.current_native_context[0])
-									raw := json2.decode[json2.Any](body_str) or {
-										return Value(EnumVariantValue{
-											enum_name: 'Result'
-											variant:   'err'
-											values:    [
-												Value('Failed to parse JSON body'),
-											]
-										})
-									}
-									return Value(EnumVariantValue{
-										enum_name: 'Result'
-										variant:   'ok'
-										values:    [json_to_value(raw)]
-									})
-								})
-							}
-						}
-					}
-					state.value = final_res
 					state.status = .resolved
+					state.value = res.result
 				}
 			}
 			else {
@@ -460,6 +261,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 		f_idx := vm.frame_count - 1
 
 		instruction := unsafe { OpCode(vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]) }
+		eprintln('OP: ${instruction}')
 		vm.frames[f_idx].ip++
 
 		match instruction {
@@ -482,9 +284,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				vm.pop()
 			}
 			.op_get_local {
-				byte := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
+				slot := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
 				vm.frames[f_idx].ip++
-				val := vm.stack[vm.frames[f_idx].slots + int(byte)]
+				val := vm.stack[vm.frames[f_idx].slots + slot]
 				vm.push(val)
 			}
 			.op_set_local {
@@ -498,8 +300,14 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				name := vm.frames[f_idx].closure.function.chunk.constants[byte]
 				if name is string {
 					if val := vm.globals[name] {
+						$if vscript_debug ? {
+							println('GET_GLOBAL: ${name} = ${vm.typeof(val)}')
+						}
 						vm.push(val)
 					} else {
+						$if vscript_debug ? {
+							println('GET_GLOBAL FAILED: ${name} (not found in ${vm.globals.keys()})')
+						}
 						if vm.runtime_error('Undefined variable "${name}"') {
 							continue
 						}
@@ -513,7 +321,6 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				name := vm.frames[f_idx].closure.function.chunk.constants[byte]
 				if name is string {
 					vm.globals[name] = vm.peek(0)
-					vm.pop()
 				}
 			}
 			.op_equal {
@@ -685,7 +492,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				}
 			}
 			.op_close_upvalue {
-				vm.close_upvalues(vm.stack_top - 1)
+				vm.close_upvalues(vm.stack.len - 1)
 				vm.pop()
 			}
 			.op_return {
@@ -693,12 +500,11 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				slots := vm.frames[f_idx].slots
 				vm.close_upvalues(slots)
 				vm.frame_count--
-				if vm.frame_count <= target_frame_count {
-					vm.stack_top = slots
-					vm.push(result)
+				if vm.frame_count == target_frame_count {
+					vm.stack.trim(slots)
 					return .ok
 				}
-				vm.stack_top = slots
+				vm.stack.trim(slots)
 				vm.push(result)
 			}
 			.op_pop_scope {
@@ -809,8 +615,28 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						vm.runtime_error('Property index must be a string')
 						return .runtime_error
 					}
+				} else if object is RequestValue {
+					if index is string {
+						match index as string {
+							'method' { vm.push(Value(object.method)) }
+							'url' { vm.push(Value(object.url)) }
+							'body' { vm.push(Value(object.body)) }
+							else { vm.push(NilValue{}) }
+						}
+					} else {
+						vm.push(NilValue{})
+					}
+				} else if object is ResponseValue {
+					if index is string {
+						match index as string {
+							'status' { vm.push(Value(f64(object.status))) }
+							else { vm.push(NilValue{}) }
+						}
+					} else {
+						vm.push(NilValue{})
+					}
 				} else {
-					if vm.runtime_error('Can only index arrays, maps or instances') {
+					if vm.runtime_error('Can only index arrays, maps, requests, responses or instances. Got ${vm.typeof(object)}') {
 						continue
 					}
 					return .runtime_error
@@ -889,6 +715,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				if name_val is string {
 					name := name_val as string
 					instance := vm.pop()
+					$if vscript_debug ? {
+						println('GET_PROPERTY: ${name} on type=${vm.typeof(instance)} val=${instance}')
+					}
 					if instance is InstanceValue {
 						if name in instance.fields {
 							vm.push(instance.fields[name] or { NilValue{} })
@@ -982,8 +811,62 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 							vm.runtime_error('Undefined property "${name}" on enum variant')
 							return .runtime_error
 						}
+					} else if instance is MapValue {
+						if name in instance.items {
+							vm.push(instance.items[name] or { NilValue{} })
+						} else {
+							vm.push(NilValue{})
+						}
+					} else if instance is RequestValue {
+						match name {
+							'method' {
+								vm.push(Value(instance.method))
+							}
+							'url' {
+								vm.push(Value(instance.url))
+							}
+							'body' {
+								vm.push(Value(instance.body))
+							}
+							'headers' {
+								mut h_map := map[string]Value{}
+								for k, v in instance.headers {
+									h_map[k] = Value(v)
+								}
+								vm.push(Value(MapValue{ items: h_map }))
+							}
+							else {
+								vm.push(NilValue{})
+							}
+						}
+					} else if instance is ResponseValue {
+						// For methods, they are attached to the map or we can return native functions here
+						match name {
+							'status' {
+								vm.push(Value(f64(instance.status)))
+							}
+							'send' {
+								vm.push(Value(NativeFunctionValue{
+									name:    'send'
+									arity:   1
+									context: [Value(instance)]
+									func:    native_response_send
+								}))
+							}
+							'json' {
+								vm.push(Value(NativeFunctionValue{
+									name:    'json'
+									arity:   1
+									context: [Value(instance)]
+									func:    native_response_json
+								}))
+							}
+							else {
+								vm.push(NilValue{})
+							}
+						}
 					} else {
-						vm.runtime_error('Only instances, structs and enums have properties. Got ${vm.typeof(instance)}')
+						vm.runtime_error('Only instances, structs, maps, requests, responses and enums have properties. Got ${vm.typeof(instance)}')
 						return .runtime_error
 					}
 				}
@@ -1082,9 +965,9 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 
 				vm.exception_handlers << ExceptionHandler{
 					frame_count:        vm.frame_count
-					stack_top:          vm.stack_top
+					stack_top:          vm.stack.len
 					handler_ip:         handler_ip
-					close_upvalues_idx: vm.stack_top
+					close_upvalues_idx: vm.stack.len
 				}
 			}
 			.op_exception_pop {
@@ -1101,23 +984,19 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					if cached := vm.modules[path] {
 						vm.push(cached)
 					} else {
-						// Load and execute module
 						mod_result := vm.import_module(path) or {
 							if vm.runtime_error('Import failed: ${err}') {
 								continue
 							}
 							return .runtime_error
 						}
-						// Cache result
 						vm.modules[path] = mod_result
 						vm.push(mod_result)
 					}
-				} else {
-					if vm.runtime_error('Import path must be a string') {
-						continue
-					}
-					return .runtime_error
 				}
+			}
+			.op_async_call {
+				// Handled by specific native functions for now
 			}
 			.op_await {
 				val := vm.pop()
@@ -1136,10 +1015,6 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				} else {
 					vm.push(val)
 				}
-			}
-			.op_async_call {
-				// To be implemented: starts a task
-				// For now fallback to normal call behavior but return Promise
 			}
 		}
 	}
@@ -1230,7 +1105,7 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			return true
 		}
 		ClassValue {
-			slot := vm.stack_top - arg_count - 1
+			slot := vm.stack.len - arg_count - 1
 			vm.stack[slot] = InstanceValue{
 				class:  callee
 				fields: map[string]Value{}
@@ -1253,7 +1128,7 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 				}
 				return false
 			}
-			slot := vm.stack_top - 1
+			slot := vm.stack.len - 1
 			mut fields := map[string]Value{}
 			for k, v in callee.field_defaults {
 				fields[k] = v
@@ -1265,7 +1140,7 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			return true
 		}
 		BoundMethodValue {
-			vm.stack[vm.stack_top - arg_count - 1] = callee.receiver
+			vm.stack[vm.stack.len - arg_count - 1] = callee.receiver
 			return vm.call_value(callee.method, arg_count)
 		}
 		EnumVariantValue {
@@ -1311,26 +1186,33 @@ fn (mut vm VM) call_closure(closure ClosureValue, arg_count int) bool {
 	vm.frame_count++
 	frame.closure = closure
 	frame.ip = 0
-	frame.slots = vm.stack_top - arg_count - 1
+	frame.slots = vm.stack.len - arg_count - 1
 	return true
 }
 
 fn (mut vm VM) push(val Value) {
-	if vm.stack_top >= stack_max {
-		vm.runtime_error('Stack overflow')
-		return
+	$if vscript_debug_stack ? {
+		println('PUSH: ${vm.typeof(val)}')
 	}
-	vm.stack[vm.stack_top] = val
-	vm.stack_top++
+	vm.stack << val
 }
 
 fn (mut vm VM) pop() Value {
-	vm.stack_top--
-	return vm.stack[vm.stack_top]
+	if vm.stack.len == 0 {
+		panic('Pop from empty stack')
+	}
+	val := vm.stack.pop()
+	$if vscript_debug_stack ? {
+		println('POP: ${vm.typeof(val)}')
+	}
+	return val
 }
 
 fn (vm &VM) peek(distance int) Value {
-	return vm.stack[vm.stack_top - 1 - distance]
+	if vm.stack.len <= distance {
+		return NilValue{}
+	}
+	return vm.stack[vm.stack.len - 1 - distance]
 }
 
 fn (mut vm VM) define_native(name string, arity int, func NativeFn) {
@@ -1359,6 +1241,8 @@ fn (vm &VM) typeof(val Value) string {
 		EnumVariantValue { 'enum_variant' }
 		BoundMethodValue { 'function' }
 		PromiseValue { 'promise' }
+		RequestValue { 'request' }
+		ResponseValue { 'response' }
 		SocketValue { 'socket' }
 		StreamValue { 'stream' }
 	}
@@ -1368,7 +1252,7 @@ fn (mut vm VM) runtime_error(message string) bool {
 	if vm.exception_handlers.len > 0 {
 		handler := vm.exception_handlers.pop()
 		vm.frame_count = handler.frame_count
-		vm.stack_top = handler.stack_top
+		vm.stack.trim(handler.stack_top)
 		vm.frames[vm.frame_count - 1].ip = handler.handler_ip
 
 		vm.close_upvalues(handler.close_upvalues_idx)
@@ -1384,6 +1268,7 @@ fn (mut vm VM) runtime_error(message string) bool {
 
 fn (mut vm VM) import_module(path string) !Value {
 	// 0. Intercept Native Modules
+
 	if path == 'core/fs.vs' {
 		val := create_fs_module(mut vm)
 		return val
@@ -1411,6 +1296,10 @@ fn (mut vm VM) import_module(path string) !Value {
 	if path == 'core/ws.vs' {
 		val := create_ws_module(mut vm)
 		return val
+	}
+	if path == 'core/http_server.vs' {
+		server_mod_val := create_http_server_module(mut vm)
+		return server_mod_val
 	}
 
 	// 1. Read source
@@ -1450,8 +1339,6 @@ fn (mut vm VM) import_module(path string) !Value {
 	// Let's re-register stdlib for now.
 	vm.register_stdlib()
 
-	// 4. Execute
-	vm.push(Value(closure))
 	if !vm.call_closure(closure, 0) {
 		// Recovery logic handles runtime error reporting, but here we need to clean up globals
 		vm.globals = old_globals.clone()
@@ -1465,6 +1352,9 @@ fn (mut vm VM) import_module(path string) !Value {
 
 	match res {
 		.ok {
+			// Pop the result of the module script (usually nil)
+			vm.pop()
+
 			// 5. Collect exports
 			exports := vm.globals.clone()
 
@@ -1551,7 +1441,7 @@ fn (mut vm VM) run_test_suite() bool {
 		}
 
 		// Reset stack
-		vm.stack_top = 0
+		vm.stack.clear()
 	}
 
 	println('\ntest result: ${if failed == 0 { 'ok' } else { 'FAILED' }}. ${passed} passed; ${failed} failed.')

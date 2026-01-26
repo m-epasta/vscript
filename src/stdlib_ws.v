@@ -40,9 +40,9 @@ fn create_ws_module(mut vm VM) Value {
 				return size * nmemb
 			})
 
-			vm.active_transfers[handle] = id
+			vm.net_manager.active_transfers[handle] = id
 
-			C.curl_multi_add_handle(vm.curl_multi_handle, handle)
+			C.curl_multi_add_handle(vm.net_manager.curl_multi_handle, handle)
 
 			return Value(PromiseValue{
 				id: id

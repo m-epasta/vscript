@@ -46,7 +46,7 @@ fn execute_http_request(mut vm VM, url_val Value, options_val Value) Value {
 		C.curl_easy_setopt(handle, curlopt_url, url.str)
 
 		// Elite Feature: Use the global share handle for pooling and persistent cookies
-		C.curl_easy_setopt(handle, curlopt_share, vm.curl_share_handle)
+		C.curl_easy_setopt(handle, curlopt_share, vm.net_manager.curl_share_handle)
 		// Enable cookie engine
 		C.curl_easy_setopt(handle, 10031, c'') // CURLOPT_COOKIEFILE = "" enables engine in memory
 
@@ -86,15 +86,15 @@ fn execute_http_request(mut vm VM, url_val Value, options_val Value) Value {
 		C.curl_easy_setopt(handle, curlopt_writedata, cb_ctx)
 		C.curl_easy_setopt(handle, curlopt_headerfunction, header_callback)
 
-		// Register with VM
-		vm.active_transfers[handle] = id
+		// Register with M
+		vm.net_manager.active_transfers[handle] = id
 		if is_streaming {
-			vm.stream_queues[handle] = chan string{cap: 100}
+			vm.net_manager.stream_queues[handle] = chan string{cap: 100}
 		} else {
-			vm.transfer_bodies[handle] = &body_ctx.body
+			vm.net_manager.transfer_bodies[handle] = &body_ctx.body
 		}
 
-		C.curl_multi_add_handle(vm.curl_multi_handle, handle)
+		C.curl_multi_add_handle(vm.net_manager.curl_multi_handle, handle)
 
 		return Value(PromiseValue{
 			id: id

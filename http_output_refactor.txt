@@ -1,0 +1,4 @@
+[line 31] Error: Unexpected character
+[line 31] Error: Unexpected character
+OP: OP_NIL
+OP: OP_RETURN

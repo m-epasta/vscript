@@ -13,6 +13,8 @@ type Value = ArrayValue
 	| NativeFunctionValue
 	| NilValue
 	| PromiseValue
+	| RequestValue
+	| ResponseValue
 	| SocketValue
 	| StreamValue
 	| StructInstanceValue
@@ -22,6 +24,22 @@ type Value = ArrayValue
 	| string
 
 struct NilValue {}
+
+@[heap]
+struct RequestValue {
+pub:
+	method  string
+	url     string
+	headers map[string]string
+	body    string
+}
+
+@[heap]
+struct ResponseValue {
+pub mut:
+	status int
+	handle voidptr // underlying connection handle
+}
 
 @[heap]
 struct SocketValue {
@@ -219,6 +237,12 @@ fn value_to_string(v Value) string {
 		PromiseValue {
 			return '<Promise id=${v.id}>'
 		}
+		RequestValue {
+			return '<Request ${v.method} ${v.url}>'
+		}
+		ResponseValue {
+			return '<Response status=${v.status}>'
+		}
 		StreamValue {
 			return '<Stream>'
 		}
@@ -247,6 +271,16 @@ fn values_equal(a Value, b Value) bool {
 		}
 		SocketValue {
 			if b is SocketValue {
+				return a.handle == b.handle
+			}
+		}
+		RequestValue {
+			if b is RequestValue {
+				return a.url == b.url && a.method == b.method
+			}
+		}
+		ResponseValue {
+			if b is ResponseValue {
 				return a.handle == b.handle
 			}
 		}

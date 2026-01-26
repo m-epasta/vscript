@@ -46,10 +46,10 @@ fn create_http2_module(mut vm VM) Value {
 			C.curl_easy_setopt(handle, curlopt_writedata, cb_ctx)
 
 			// Register with VM Multi Handle
-			vm.active_transfers[handle] = id
-			vm.transfer_bodies[handle] = &body_ctx.body
+			vm.net_manager.active_transfers[handle] = id
+			vm.net_manager.transfer_bodies[handle] = &body_ctx.body
 
-			C.curl_multi_add_handle(vm.curl_multi_handle, handle)
+			C.curl_multi_add_handle(vm.net_manager.curl_multi_handle, handle)
 
 			return Value(PromiseValue{
 				id: id
