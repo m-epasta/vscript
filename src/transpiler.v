@@ -191,8 +191,54 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 			t.indent()
 			t.output.write_string('}\n')
 		}
-		StructStmt, EnumStmt {
-			// TODO: Implement JS transpilation for static data
+		StructStmt {
+			t.indent()
+			t.output.write_string('class ')
+			t.output.write_string(stmt.name.lexeme)
+			t.output.write_string(' {\n')
+			t.indent_level++
+			t.indent()
+			t.output.write_string('constructor(init = {}) {\n')
+			t.indent_level++
+			for field in stmt.fields {
+				t.indent()
+				t.output.write_string('this.')
+				t.output.write_string(field.name.lexeme)
+				t.output.write_string(' = init.')
+				t.output.write_string(field.name.lexeme)
+				t.output.write_string(' !== undefined ? init.')
+				t.output.write_string(field.name.lexeme)
+				t.output.write_string(' : ')
+				if init := field.initializer {
+					t.visit_expr(init)
+				} else {
+					t.output.write_string('null')
+				}
+				t.output.write_string(';\n')
+			}
+			t.indent_level--
+			t.indent()
+			t.output.write_string('}\n')
+			t.indent_level--
+			t.indent()
+			t.output.write_string('}\n')
+		}
+		EnumStmt {
+			t.indent()
+			t.output.write_string('const ')
+			t.output.write_string(stmt.name.lexeme)
+			t.output.write_string(' = {\n')
+			t.indent_level++
+			for variant in stmt.variants {
+				t.indent()
+				t.output.write_string(variant.name.lexeme)
+				t.output.write_string(': "')
+				t.output.write_string(variant.name.lexeme)
+				t.output.write_string('",\n')
+			}
+			t.indent_level--
+			t.indent()
+			t.output.write_string('};\n')
 		}
 		ImportStmt {
 			// Generate CommonJS require or ES import
@@ -207,6 +253,25 @@ fn (mut t Transpiler) visit_stmt(stmt Stmt) {
 				// JS require is usually const X = require...
 				// For now just require
 			}
+			if stmt.path.literal == 'core/json.vs' {
+				// Special case for native JSON
+				// Parent block already printed 'const alias = ' if alias existed
+				// Wait, parent block lines 246-250 print 'const alias = '
+				// So here we should just print 'JSON;\n'?
+				// No, the parent block logic logic prints "const alias = " THEN prints require.
+				// My previous edit inserted the check AFTER the parent printing.
+
+				// Currently:
+				// t.indent()
+				// if alias { print "const alias = " }
+				// if path == json { print "const alias = JSON;" return }
+
+				// Fix: Just print "JSON;\n" if alias was present, otherwise handle weird case.
+				// Actually cleaner to rewrite the whole ImportStmt block to be aware of special paths first.
+				t.output.write_string('JSON;\n')
+				return
+			}
+
 			t.output.write_string('require("')
 			t.output.write_string(stmt.path.literal)
 			t.output.write_string('");\n')
@@ -252,6 +317,16 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.visit_expr(expr.value)
 		}
 		CallExpr {
+			// Handle method intercepts
+			if expr.callee is GetExpr {
+				if expr.callee.name.lexeme == 'keys' {
+					t.output.write_string('Object.keys(')
+					t.visit_expr(expr.callee.object)
+					t.output.write_string(')')
+					return
+				}
+			}
+
 			// Handle built-ins
 			if expr.callee is VariableExpr {
 				if expr.callee.name.lexeme == 'println' || expr.callee.name.lexeme == 'print' {
@@ -334,8 +409,12 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 		}
 		GetExpr {
 			t.visit_expr(expr.object)
-			t.output.write_string('.')
-			t.output.write_string(expr.name.lexeme)
+			if expr.name.lexeme == 'len' {
+				t.output.write_string('.length')
+			} else {
+				t.output.write_string('.')
+				t.output.write_string(expr.name.lexeme)
+			}
 		}
 		SetExpr {
 			t.visit_expr(expr.object)
@@ -348,8 +427,52 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.output.write_string('this')
 		}
 		MatchExpr {
-			// TODO: Implement JS transpilation for pattern matching
-			t.output.write_string('/* match expression stub */')
+			// Transpile match expression as an IIFE with switch
+			// (() => { switch(target) { case ... return ... } })()
+			t.output.write_string('(() => {\n')
+			t.indent_level++
+			t.indent()
+			t.output.write_string('switch (')
+			t.visit_expr(expr.target)
+			t.output.write_string(') {\n')
+			t.indent_level++
+
+			for arm in expr.arms {
+				t.indent()
+				match arm.pattern {
+					LiteralPattern {
+						t.output.write_string('case ')
+						t.visit_expr(arm.pattern.value)
+						t.output.write_string(': ')
+					}
+					VariantPattern {
+						// For now assuming enums are strings or objects with toString/value
+						// In JS output for simple string enums:
+						t.output.write_string('case ')
+						if enum_name := arm.pattern.enum_name {
+							t.output.write_string(enum_name.lexeme)
+							t.output.write_string('.')
+						}
+						t.output.write_string(arm.pattern.variant.lexeme)
+						t.output.write_string(': ')
+					}
+					IdentifierPattern {
+						// Catch-all/Default
+						t.output.write_string('default: ')
+					}
+				}
+
+				t.output.write_string('return ')
+				t.visit_expr(arm.body)
+				t.output.write_string(';\n')
+			}
+
+			t.indent_level--
+			t.indent()
+			t.output.write_string('}\n')
+			t.indent_level--
+			t.indent()
+			t.output.write_string('})()')
 		}
 		AwaitExpr {
 			t.output.write_string('(await ')
