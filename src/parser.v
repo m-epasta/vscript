@@ -746,6 +746,10 @@ fn (mut p Parser) primary() !Expr {
 		})
 	}
 
+	if p.match_([.string_interp_start]) {
+		return p.interpolated_string()
+	}
+
 	if p.match_([.this_keyword]) {
 		return Expr(ThisExpr{
 			keyword: p.previous()
@@ -788,6 +792,39 @@ fn (mut p Parser) primary() !Expr {
 	}
 
 	return error('Expect expression')
+}
+
+fn (mut p Parser) interpolated_string() !Expr {
+	mut parts := []Expr{}
+	// First segment
+	parts << Expr(LiteralExpr{
+		value: p.previous().literal
+		type_: .string
+	})
+
+	for {
+		// Interpolated expression
+		parts << p.expression()!
+
+		if p.match_([.string_interp_middle]) {
+			parts << Expr(LiteralExpr{
+				value: p.previous().literal
+				type_: .string
+			})
+		} else if p.match_([.string_interp_end]) {
+			parts << Expr(LiteralExpr{
+				value: p.previous().literal
+				type_: .string
+			})
+			break
+		} else {
+			return error("Expect '}' or more string segments after interpolation expression")
+		}
+	}
+
+	return Expr(InterpolatedStringExpr{
+		parts: parts
+	})
 }
 
 fn (mut p Parser) function_expression_with_async(is_async bool) !Expr {

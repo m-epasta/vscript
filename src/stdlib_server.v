@@ -27,11 +27,15 @@ fn create_http_server_module(mut vm VM) Value {
 		server_obj['port'] = Value(f64(actual_port))
 		vm.define_native_in_map(mut server_obj, 'accept', 0, native_server_accept)
 
-		return Value(MapValue{ items: server_obj })
+		return Value(MapValue{
+			items: server_obj
+			gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
+		})
 	})
 
 	return Value(MapValue{
 		items: exports
+		gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 	})
 }
 
@@ -49,6 +53,7 @@ fn native_server_accept(mut vm VM, args []Value) Value {
 	vm.promises[promise_id] = &PromiseState{
 		status: .pending
 		value:  NilValue{}
+		gc:     vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 	}
 
 	vm.net_manager.server_accept_queue << promise_id

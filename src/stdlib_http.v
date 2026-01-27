@@ -30,6 +30,7 @@ fn execute_http_request(mut vm VM, url_val Value, options_val Value) Value {
 		mut state := &PromiseState{
 			status: .pending
 			value:  NilValue{}
+			gc:     vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 		}
 		vm.promises[id] = state
 
@@ -115,6 +116,7 @@ fn create_http_module(mut vm VM) Value {
 			items: {
 				'method': Value('GET')
 			}
+			gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 		}))
 	})
 
@@ -124,6 +126,7 @@ fn create_http_module(mut vm VM) Value {
 				'method': Value('POST')
 				'body':   args[1]
 			}
+			gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 		}))
 	})
 
@@ -138,6 +141,7 @@ fn create_http_module(mut vm VM) Value {
 				items: {
 					'method': Value('GET')
 				}
+				gc:    v.alloc_header(int(int(sizeof(EnumVariantValue))))
 			}))
 		})
 
@@ -147,13 +151,18 @@ fn create_http_module(mut vm VM) Value {
 					'method': Value('POST')
 					'body':   a[1]
 				}
+				gc:    v.alloc_header(int(int(sizeof(EnumVariantValue))))
 			}))
 		})
 
-		return Value(MapValue{ items: sess })
+		return Value(MapValue{
+			items: sess
+			gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
+		})
 	})
 
 	return Value(MapValue{
 		items: exports
+		gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 	})
 }

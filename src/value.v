@@ -22,16 +22,27 @@ type Value = ArrayValue
 	| bool
 	| f64
 	| string
+	| Upvalue
+	| PromiseState
 
 struct NilValue {}
 
 @[heap]
+struct GCHeader {
+pub mut:
+	marked bool
+	size   int
+	next   &GCHeader = unsafe { nil }
+}
+
+@[heap]
 struct RequestValue {
-pub:
+pub mut:
 	method  string
 	url     string
 	headers map[string]string
 	body    string
+	gc      &GCHeader = unsafe { nil }
 }
 
 @[heap]
@@ -39,100 +50,121 @@ struct ResponseValue {
 pub mut:
 	status int
 	handle voidptr // underlying connection handle
+	gc     &GCHeader = unsafe { nil }
 }
 
 @[heap]
 struct SocketValue {
-pub:
+pub mut:
 	handle   voidptr
 	messages chan string
+	gc       &GCHeader = unsafe { nil }
 }
 
 @[heap]
 struct StreamValue {
-pub:
-	chunks chan string
-mut:
+pub mut:
+	chunks    chan string
 	is_closed bool
+	gc        &GCHeader = unsafe { nil }
 }
 
 struct FunctionValue {
-pub:
+pub mut:
 	arity          int
 	upvalues_count int
 	chunk          &Chunk
 	name           string
 	attributes     []string // Stores attribute names/values for runtime reflection (e.g. test)
 	is_async       bool
+	gc             &GCHeader = unsafe { nil }
 }
 
 struct ClosureValue {
-pub:
+pub mut:
 	function FunctionValue
-mut:
 	upvalues []&Upvalue
+	gc       &GCHeader = unsafe { nil }
 }
 
 type NativeFn = fn (mut VM, []Value) Value
 
 struct NativeFunctionValue {
+pub mut:
 	name    string
 	arity   int
 	func    NativeFn @[required]
 	context []Value
+	gc      &GCHeader = unsafe { nil }
 }
 
 struct ArrayValue {
-mut:
+pub mut:
 	elements []Value
+	gc       &GCHeader = unsafe { nil }
 }
 
 struct MapValue {
-mut:
+pub mut:
 	items map[string]Value
+	gc    &GCHeader = unsafe { nil }
 }
 
 struct ClassValue {
-	name string
-mut:
+pub mut:
+	name    string
 	methods map[string]Value // Can be ClosureValue or NativeFunctionValue wrapper
+	gc      &GCHeader = unsafe { nil }
 }
 
 struct InstanceValue {
-	class ClassValue
-mut:
+pub mut:
+	class  ClassValue
 	fields map[string]Value
-}
-
-struct StructValue {
-	name string
-mut:
-	field_names    []string
-	field_types    map[string]string
-	field_defaults map[string]Value
-}
-
-struct StructInstanceValue {
-	struct_type StructValue
-mut:
-	fields map[string]Value
-}
-
-struct EnumValue {
-	name string
-mut:
-	variants []string
-}
-
-struct EnumVariantValue {
-	enum_name string
-	variant   string
-	values    []Value // Associated data for Sum Types
+	gc     &GCHeader = unsafe { nil }
 }
 
 struct BoundMethodValue {
+pub mut:
 	receiver Value
-	method   Value // Can be ClosureValue or NativeFunctionValue wrapper
+	method   Value // ClosureValue or NativeFunctionValue
+	gc       &GCHeader = unsafe { nil }
+}
+
+struct EnumValue {
+pub mut:
+	name     string
+	variants []string
+	gc       &GCHeader = unsafe { nil }
+}
+
+struct EnumVariantValue {
+pub mut:
+	enum_name string
+	variant   string
+	values    []Value
+	gc        &GCHeader = unsafe { nil }
+}
+
+struct StructValue {
+pub mut:
+	name           string
+	field_names    []string
+	field_types    map[string]string
+	field_defaults map[string]Value
+	gc             &GCHeader = unsafe { nil }
+}
+
+struct StructInstanceValue {
+pub mut:
+	struct_type StructValue
+	fields      map[string]Value
+	gc          &GCHeader = unsafe { nil }
+}
+
+struct PromiseValue {
+pub mut:
+	id int
 }
 
 enum PromiseStatus {
@@ -146,36 +178,87 @@ struct PromiseState {
 pub mut:
 	status PromiseStatus
 	value  Value
+	gc     &GCHeader = unsafe { nil }
 }
 
-struct PromiseValue {
-pub mut:
-	id int
-}
-
-@[heap]
 struct Upvalue {
-mut:
-	value     &Value
-	closed    Value
-	is_closed bool
-	// Index in the stack where the variable lives (while open)
+pub mut:
+	value        &Value = unsafe { nil }
+	closed       Value
 	location_idx int
+	is_closed    bool
+	next         &Upvalue  = unsafe { nil }
+	gc           &GCHeader = unsafe { nil }
+}
+
+fn is_falsey(v Value) bool {
+	match v {
+		NilValue { return true }
+		bool { return !v }
+		else { return false }
+	}
+}
+
+fn values_equal(a Value, b Value) bool {
+	if a is bool && b is bool {
+		return (a as bool) == (b as bool)
+	}
+	if a is f64 && b is f64 {
+		return (a as f64) == (b as f64)
+	}
+	if a is string && b is string {
+		return (a as string) == (b as string)
+	}
+	if a is NilValue && b is NilValue {
+		return true
+	}
+
+	// For other types, they are only equal if they are the same object/pointer
+	// which for structs means value equality, but since they contain maps/arrays
+	// we should be careful. For now, we'll return false if not same type.
+	// Actually, matching types is usually enough for Lox.
+
+	// Note: Comparing non-primitive types by value in V can be complex.
+	return false
 }
 
 fn value_to_string(v Value) string {
 	match v {
-		f64 {
-			return v.str()
+		NilValue {
+			return 'nil'
 		}
 		bool {
+			return v.str()
+		}
+		f64 {
 			return v.str()
 		}
 		string {
 			return v
 		}
-		NilValue {
-			return 'nil'
+		ArrayValue {
+			mut res := '['
+			for i, element in v.elements {
+				res += value_to_string(element)
+				if i < v.elements.len - 1 {
+					res += ', '
+				}
+			}
+			res += ']'
+			return res
+		}
+		MapValue {
+			mut res := '{'
+			mut keys := v.items.keys()
+			for i, k in keys {
+				val := v.items[k] or { NilValue{} }
+				res += '"${k}": ${value_to_string(val)}'
+				if i < keys.len - 1 {
+					res += ', '
+				}
+			}
+			res += '}'
+			return res
 		}
 		FunctionValue {
 			return '<fn ${v.name}>'
@@ -186,131 +269,58 @@ fn value_to_string(v Value) string {
 		NativeFunctionValue {
 			return '<native fn ${v.name}>'
 		}
-		SocketValue {
-			return '<Socket>'
-		}
-		ArrayValue {
-			mut res := '['
-			for i, elem in v.elements {
-				res += value_to_string(elem)
-				if i < v.elements.len - 1 {
-					res += ', '
-				}
-			}
-			res += ']'
-			return res
-		}
-		MapValue {
-			mut res := '{'
-			mut count := 0
-			for k, val in v.items {
-				res += '"' + k + '": ' + value_to_string(val)
-				if count < v.items.len - 1 {
-					res += ', '
-				}
-				count++
-			}
-			res += '}'
-			return res
-		}
 		ClassValue {
 			return '<class ${v.name}>'
 		}
 		InstanceValue {
 			return '<instance of ${v.class.name}>'
 		}
-		StructValue {
-			return '<struct type ${v.name}>'
-		}
-		StructInstanceValue {
-			return '<struct instance of ${v.struct_type.name}>'
+		BoundMethodValue {
+			return '<bound method>'
 		}
 		EnumValue {
 			return '<enum ${v.name}>'
 		}
 		EnumVariantValue {
-			return '${v.enum_name}.${v.variant}'
-		}
-		BoundMethodValue {
-			return value_to_string(v.method)
+			mut res := '${v.enum_name}.${v.variant}'
+			if v.values.len > 0 {
+				res += '('
+				for i, val in v.values {
+					res += value_to_string(val)
+					if i < v.values.len - 1 {
+						res += ', '
+					}
+				}
+				res += ')'
+			}
+			return res
 		}
 		PromiseValue {
-			return '<Promise id=${v.id}>'
+			return '<promise ${v.id}>'
+		}
+		StructValue {
+			return '<struct ${v.name}>'
+		}
+		StructInstanceValue {
+			return '<struct instance ${v.struct_type.name}>'
 		}
 		RequestValue {
 			return '<Request ${v.method} ${v.url}>'
 		}
 		ResponseValue {
-			return '<Response status=${v.status}>'
+			return '<Response ${v.status}>'
+		}
+		SocketValue {
+			return '<Socket>'
 		}
 		StreamValue {
 			return '<Stream>'
 		}
-	}
-}
-
-fn values_equal(a Value, b Value) bool {
-	match a {
-		NilValue {
-			return b is NilValue
+		Upvalue {
+			return '<upvalue>'
 		}
-		f64 {
-			if b is f64 {
-				return a == b
-			}
+		PromiseState {
+			return '<promise state>'
 		}
-		bool {
-			if b is bool {
-				return a == b
-			}
-		}
-		string {
-			if b is string {
-				return a == b
-			}
-		}
-		SocketValue {
-			if b is SocketValue {
-				return a.handle == b.handle
-			}
-		}
-		RequestValue {
-			if b is RequestValue {
-				return a.url == b.url && a.method == b.method
-			}
-		}
-		ResponseValue {
-			if b is ResponseValue {
-				return a.handle == b.handle
-			}
-		}
-		EnumVariantValue {
-			if b is EnumVariantValue {
-				if a.enum_name != b.enum_name || a.variant != b.variant {
-					return false
-				}
-				if a.values.len != b.values.len {
-					return false
-				}
-				for i in 0 .. a.values.len {
-					if !values_equal(a.values[i], b.values[i]) {
-						return false
-					}
-				}
-				return true
-			}
-		}
-		else {
-			return false
-		}
-	}
-	return false
-}
-
-fn is_falsey(v Value) bool {
-	match v {
-		NilValue { return true }
-		bool { return !v }
-		else { return false }
 	}
 }

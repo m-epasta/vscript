@@ -25,10 +25,15 @@ type Expr = BinaryExpr
 	| ThisExpr
 	| MatchExpr
 	| AwaitExpr
+	| InterpolatedStringExpr
 
 struct AwaitExpr {
 	keyword Token
 	value   Expr
+}
+
+struct InterpolatedStringExpr {
+	parts []Expr
 }
 
 struct BinaryExpr {

@@ -46,51 +46,58 @@ mut:
 	next_promise_id        int
 	current_native_context []Value
 	net_manager            NetworkManager
+	objects_head           &GCHeader
+	gc_threshold           int
+	bytes_allocated        int
+	gray_stack             []Value
 }
 
 fn new_vm() VM {
-	unsafe {
-		dummy_chunk := &Chunk{
-			code:      []u8{cap: 1}
-			constants: []Value{cap: 1}
-			lines:     []int{cap: 1}
-		}
-		dummy_fn := FunctionValue{
-			arity:          0
-			upvalues_count: 0
-			chunk:          dummy_chunk
-			name:           'dummy'
-		}
-		dummy_closure := ClosureValue{
-			function: dummy_fn
-			upvalues: []&Upvalue{}
-		}
-
-		mut frames := []CallFrame{cap: 64}
-		for _ in 0 .. 64 {
-			frames << CallFrame{
-				closure: dummy_closure
-				ip:      0
-				slots:   0
-			}
-		}
-
-		mut vm := VM{
-			frames:             frames
-			frame_count:        0
-			stack:              []Value{cap: stack_max}
-			globals:            map[string]Value{}
-			open_upvalues:      []&Upvalue{}
-			is_test_mode:       false
-			exception_handlers: []ExceptionHandler{cap: 16}
-			modules:            map[string]Value{}
-			task_results:       chan TaskResult{cap: 100}
-			net_manager:        new_network_manager()
-		}
-
-		vm.register_stdlib()
-		return vm
+	dummy_chunk := &Chunk{
+		code:      []u8{cap: 1}
+		constants: []Value{cap: 1}
+		lines:     []int{cap: 1}
 	}
+	dummy_fn := FunctionValue{
+		arity:          0
+		upvalues_count: 0
+		chunk:          dummy_chunk
+		name:           'dummy'
+		gc:             unsafe { nil }
+	}
+	dummy_closure := ClosureValue{
+		function: dummy_fn
+		upvalues: []&Upvalue{}
+		gc:       unsafe { nil }
+	}
+
+	mut frames := []CallFrame{cap: 64}
+	for _ in 0 .. 64 {
+		frames << CallFrame{
+			closure: dummy_closure
+			ip:      0
+			slots:   0
+		}
+	}
+
+	mut vm := VM{
+		frames:             frames
+		frame_count:        0
+		stack:              []Value{cap: stack_max}
+		globals:            map[string]Value{}
+		open_upvalues:      []&Upvalue{}
+		is_test_mode:       false
+		exception_handlers: []ExceptionHandler{cap: 16}
+		modules:            map[string]Value{}
+		task_results:       chan TaskResult{cap: 100}
+		net_manager:        new_network_manager()
+		objects_head:       unsafe { nil }
+		gc_threshold:       1024 * 1024 // 1MB default
+		bytes_allocated:    0
+	}
+
+	vm.register_stdlib()
+	return vm
 }
 
 fn native_stream_read(mut vm VM, args []Value) Value {
@@ -100,6 +107,7 @@ fn native_stream_read(mut vm VM, args []Value) Value {
 	state := &PromiseState{
 		status: .pending
 		value:  NilValue{}
+		gc:     vm.alloc_header(int(sizeof(MapValue)))
 	}
 	vm.promises[id] = state
 	spawn fn (id int, q chan string, results_chan chan TaskResult) {
@@ -144,6 +152,7 @@ fn native_socket_recv(mut vm VM, args []Value) Value {
 	state := &PromiseState{
 		status: .pending
 		value:  NilValue{}
+		gc:     vm.alloc_header(int(sizeof(MapValue)))
 	}
 	vm.promises[id] = state
 
@@ -243,7 +252,8 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 
 	closure := ClosureValue{
 		function: function
-		upvalues: []&Upvalue{}
+		upvalues: []&Upvalue{len: function.upvalues_count, cap: function.upvalues_count, init: unsafe { nil }}
+		gc:       vm.alloc_header(int(sizeof(ClosureValue)))
 	}
 
 	vm.push(Value(closure))
@@ -261,7 +271,6 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 		f_idx := vm.frame_count - 1
 
 		instruction := unsafe { OpCode(vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]) }
-		eprintln('OP: ${instruction}')
 		vm.frames[f_idx].ip++
 
 		match instruction {
@@ -463,7 +472,8 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					func_val := constant as FunctionValue
 					mut cl := ClosureValue{
 						function: func_val
-						upvalues: []&Upvalue{}
+						upvalues: []&Upvalue{len: func_val.upvalues_count, cap: func_val.upvalues_count, init: unsafe { nil }}
+						gc:       vm.alloc_header(int(sizeof(ClosureValue)))
 					}
 					for _ in 0 .. func_val.upvalues_count {
 						is_local := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip] == 1
@@ -563,7 +573,10 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				for _ in 0 .. int(arg_count) {
 					vm.pop()
 				}
-				vm.push(ArrayValue{ elements: elements })
+				vm.push(ArrayValue{
+					elements: elements
+					gc:       vm.alloc_header(int(sizeof(ArrayValue)))
+				})
 			}
 			.op_build_map {
 				pair_count := vm.frames[f_idx].closure.function.chunk.code[vm.frames[f_idx].ip]
@@ -576,7 +589,10 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						items[key_val as string] = val
 					}
 				}
-				vm.push(MapValue{ items: items })
+				vm.push(MapValue{
+					items: items
+					gc:    vm.alloc_header(int(sizeof(BoundMethodValue)))
+				})
 			}
 			.op_index_get {
 				index := vm.pop()
@@ -607,7 +623,11 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 						if key in object.fields {
 							vm.push(object.fields[key] or { NilValue{} })
 						} else if method := object.class.methods[key] {
-							vm.push(BoundMethodValue{ receiver: object, method: method })
+							vm.push(BoundMethodValue{
+								receiver: object
+								method:   method
+								gc:       vm.alloc_header(int(sizeof(NativeFunctionValue)))
+							})
 						} else {
 							vm.push(NilValue{})
 						}
@@ -691,6 +711,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					vm.push(ClassValue{
 						name:    name
 						methods: map[string]Value{}
+						gc:      vm.alloc_header(int(sizeof(ArrayValue)))
 					})
 				}
 			}
@@ -726,6 +747,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 								vm.push(BoundMethodValue{
 									receiver: instance
 									method:   method
+									gc:       vm.alloc_header(int(sizeof(InstanceValue)))
 								})
 							} else {
 								if vm.runtime_error('Undefined property "${name}"') {
@@ -748,6 +770,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 							vm.push(EnumVariantValue{
 								enum_name: instance.name
 								variant:   name
+								gc:        vm.alloc_header(int(sizeof(ArrayValue)))
 							})
 						} else {
 							if vm.runtime_error('Undefined enum variant "${name}"') {
@@ -770,6 +793,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 									vm.runtime_error('Panic: called unwrap on ${instance.enum_name}.${instance.variant}')
 									return Value(NilValue{})
 								}
+								gc:    vm.alloc_header(int(sizeof(ArrayValue)))
 							}))
 						} else if name == 'expect' {
 							vm.push(Value(NativeFunctionValue{
@@ -790,6 +814,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 									vm.runtime_error('Panic: ${msg}')
 									return Value(NilValue{})
 								}
+								gc:    vm.alloc_header(int(sizeof(ArrayValue)))
 							}))
 						} else if name == 'is_ok' || name == 'is_some' {
 							vm.push(Value(NativeFunctionValue{
@@ -798,6 +823,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 								func:  fn [instance] (mut vm VM, args []Value) Value {
 									return Value(instance.variant in ['ok', 'some'])
 								}
+								gc:    vm.alloc_header(int(sizeof(ArrayValue)))
 							}))
 						} else if name == 'is_err' || name == 'is_none' {
 							vm.push(Value(NativeFunctionValue{
@@ -806,9 +832,24 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 								func:  fn [instance] (mut vm VM, args []Value) Value {
 									return Value(instance.variant in ['err', 'error', 'none'])
 								}
+								gc:    vm.alloc_header(int(sizeof(ArrayValue)))
 							}))
 						} else {
 							vm.runtime_error('Undefined property "${name}" on enum variant')
+							return .runtime_error
+						}
+					} else if instance is ArrayValue {
+						if name == 'length' {
+							vm.push(Value(NativeFunctionValue{
+								name:  'length'
+								arity: 0
+								func:  fn [instance] (mut vm VM, args []Value) Value {
+									return Value(f64(instance.elements.len))
+								}
+								gc:    vm.alloc_header(int(sizeof(MapValue)))
+							}))
+						} else {
+							vm.runtime_error('Undefined property "${name}" on array')
 							return .runtime_error
 						}
 					} else if instance is MapValue {
@@ -833,7 +874,10 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 								for k, v in instance.headers {
 									h_map[k] = Value(v)
 								}
-								vm.push(Value(MapValue{ items: h_map }))
+								vm.push(Value(MapValue{
+									items: h_map
+									gc:    vm.alloc_header(int(sizeof(InstanceValue)))
+								}))
 							}
 							else {
 								vm.push(NilValue{})
@@ -851,6 +895,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 									arity:   1
 									context: [Value(instance)]
 									func:    native_response_send
+									gc:      vm.alloc_header(int(sizeof(ArrayValue)))
 								}))
 							}
 							'json' {
@@ -859,6 +904,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 									arity:   1
 									context: [Value(instance)]
 									func:    native_response_json
+									gc:      vm.alloc_header(int(sizeof(MapValue)))
 								}))
 							}
 							else {
@@ -904,6 +950,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 					field_names:    []string{cap: int(field_count)}
 					field_types:    map[string]string{}
 					field_defaults: map[string]Value{}
+					gc:             vm.alloc_header(int(sizeof(StructValue)))
 				}
 
 				for _ in 0 .. field_count {
@@ -945,6 +992,7 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				mut ev := EnumValue{
 					name:     name
 					variants: []string{cap: int(variant_count)}
+					gc:       vm.alloc_header(int(sizeof(EnumValue)))
 				}
 
 				for _ in 0 .. variant_count {
@@ -1034,6 +1082,7 @@ fn (mut vm VM) capture_upvalue(local_idx int) &Upvalue {
 		value:        &vm.stack[local_idx]
 		location_idx: local_idx
 		is_closed:    false
+		gc:           vm.alloc_header(int(sizeof(Upvalue)))
 	}
 	vm.open_upvalues << created_upvalue
 	return created_upvalue
@@ -1056,6 +1105,12 @@ fn (mut vm VM) close_upvalues(last_slot int) {
 fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 	match callee {
 		ClosureValue {
+			if arg_count != callee.function.arity {
+				if vm.runtime_error('Expected ${callee.function.arity} arguments but got ${arg_count}') {
+					return true
+				}
+				return false
+			}
 			if !vm.call_closure(callee, arg_count) {
 				return false
 			}
@@ -1098,6 +1153,7 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			closure := ClosureValue{
 				function: callee
 				upvalues: []&Upvalue{}
+				gc:       vm.alloc_header(int(sizeof(StructInstanceValue)))
 			}
 			if !vm.call_closure(closure, arg_count) {
 				return false
@@ -1109,6 +1165,7 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			vm.stack[slot] = InstanceValue{
 				class:  callee
 				fields: map[string]Value{}
+				gc:     vm.alloc_header(int(sizeof(ClassValue)))
 			}
 
 			if initializer := callee.methods['init'] {
@@ -1122,20 +1179,22 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			return true
 		}
 		StructValue {
-			if arg_count != 0 {
-				if vm.runtime_error('Struct constructors take 0 arguments for now (use fields)') {
+			if arg_count != callee.field_names.len {
+				if vm.runtime_error('Expected ${callee.field_names.len} arguments for struct ${callee.name} but got ${arg_count}') {
 					return true
 				}
 				return false
 			}
-			slot := vm.stack.len - 1
 			mut fields := map[string]Value{}
-			for k, v in callee.field_defaults {
-				fields[k] = v
+			for i := 0; i < arg_count; i++ {
+				name := callee.field_names[arg_count - 1 - i]
+				fields[name] = vm.pop()
 			}
+			slot := vm.stack.len - 1
 			vm.stack[slot] = StructInstanceValue{
 				struct_type: callee
 				fields:      fields
+				gc:          vm.alloc_header(int(sizeof(EnumVariantValue)))
 			}
 			return true
 		}
@@ -1155,6 +1214,7 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 				enum_name: callee.enum_name
 				variant:   callee.variant
 				values:    vals
+				gc:        vm.alloc_header(int(sizeof(EnumVariantValue)))
 			})
 			return true
 		}
@@ -1221,6 +1281,7 @@ fn (mut vm VM) define_native(name string, arity int, func NativeFn) {
 		arity:   arity
 		func:    func
 		context: []Value{}
+		gc:      vm.alloc_header(int(sizeof(NativeFunctionValue)))
 	}
 }
 
@@ -1245,6 +1306,8 @@ fn (vm &VM) typeof(val Value) string {
 		ResponseValue { 'response' }
 		SocketValue { 'socket' }
 		StreamValue { 'stream' }
+		Upvalue { 'upvalue' }
+		PromiseState { 'promise_state' }
 	}
 }
 
@@ -1284,6 +1347,9 @@ fn (mut vm VM) import_module(path string) !Value {
 	if path == 'core/json.vs' {
 		val := create_json_module(mut vm)
 		return val
+	}
+	if path == 'core/gc.vs' {
+		return create_gc_module(mut vm)
 	}
 	if path == 'core/http.vs' {
 		val := create_http_module(mut vm)
@@ -1329,6 +1395,7 @@ fn (mut vm VM) import_module(path string) !Value {
 	closure := ClosureValue{
 		function: function
 		upvalues: []&Upvalue{}
+		gc:       vm.alloc_header(int(sizeof(ClosureValue)))
 	}
 
 	// 3. Prepare execution environment (Swap Globals)
@@ -1368,6 +1435,7 @@ fn (mut vm VM) import_module(path string) !Value {
 			// Wrap in MapValue
 			return Value(MapValue{
 				items: exports
+				gc:    vm.alloc_header(int(sizeof(ClosureValue)))
 			})
 		}
 		else {
@@ -1383,6 +1451,7 @@ fn (mut vm VM) define_native_in_map(mut items map[string]Value, name string, ari
 		arity:   arity
 		func:    func
 		context: []Value{}
+		gc:      vm.alloc_header(int(sizeof(NativeFunctionValue)))
 	}
 }
 
@@ -1392,6 +1461,7 @@ fn (mut vm VM) define_native_in_map_with_context(mut items map[string]Value, nam
 		arity:   arity
 		func:    func
 		context: context
+		gc:      vm.alloc_header(int(sizeof(NativeFunctionValue)))
 	}
 }
 

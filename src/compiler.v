@@ -432,6 +432,17 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 			c.compile_expr(expr.value)!
 			c.emit_byte(u8(OpCode.op_await))
 		}
+		InterpolatedStringExpr {
+			if expr.parts.len > 0 {
+				c.compile_expr(expr.parts[0])!
+				for i in 1 .. expr.parts.len {
+					c.compile_expr(expr.parts[i])!
+					c.emit_byte(u8(OpCode.op_add))
+				}
+			} else {
+				c.emit_bytes(u8(OpCode.op_constant), c.make_constant(Value('')))
+			}
+		}
 	}
 }
 

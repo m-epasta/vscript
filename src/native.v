@@ -57,6 +57,7 @@ fn native_slice(mut vm VM, args []Value) Value {
 			if start < 0 || start > val.elements.len {
 				return Value(ArrayValue{
 					elements: []Value{}
+					gc:       vm.alloc_header(int(sizeof(ArrayValue)))
 				})
 			}
 			e := if end > val.elements.len {
@@ -69,6 +70,7 @@ fn native_slice(mut vm VM, args []Value) Value {
 			res := val.elements[start..e].clone()
 			return Value(ArrayValue{
 				elements: res
+				gc:       vm.alloc_header(int(sizeof(ArrayValue)))
 			})
 		}
 		else {
@@ -238,6 +240,7 @@ fn native_map(mut vm VM, args []Value) Value {
 		}
 		return Value(ArrayValue{
 			elements: new_elements
+			gc:       vm.alloc_header(int(sizeof(ArrayValue)))
 		})
 	}
 	return args[0]
@@ -262,6 +265,7 @@ fn native_filter(mut vm VM, args []Value) Value {
 		}
 		return Value(ArrayValue{
 			elements: new_elements
+			gc:       vm.alloc_header(int(sizeof(ArrayValue)))
 		})
 	}
 	return args[0]
@@ -283,6 +287,7 @@ fn native_range(mut vm VM, args []Value) Value {
 	if step == 0 {
 		return Value(ArrayValue{
 			elements: []Value{}
+			gc:       vm.alloc_header(int(sizeof(ArrayValue)))
 		})
 	}
 	mut elements := []Value{}
@@ -297,6 +302,7 @@ fn native_range(mut vm VM, args []Value) Value {
 	}
 	return Value(ArrayValue{
 		elements: elements
+		gc:       vm.alloc_header(int(sizeof(MapValue)))
 	})
 }
 
@@ -408,9 +414,9 @@ fn native_memoize(mut vm VM, args []Value) Value {
 	callee := args[0]
 	mut cache := map[string]Value{}
 	return Value(NativeFunctionValue{
-		name:  'memoized_wrapper'
-		arity: -1
-		func:  fn [callee, mut cache] (mut vm VM, args []Value) Value {
+		name:    'memoized_wrapper'
+		arity:   -1
+		func:    fn [callee, mut cache] (mut vm VM, args []Value) Value {
 			key := args.str()
 			if val := cache[key] {
 				return val
@@ -428,6 +434,8 @@ fn native_memoize(mut vm VM, args []Value) Value {
 			}
 			return Value(NilValue{})
 		}
+		context: []Value{}
+		gc:      vm.alloc_header(int(sizeof(MapValue)))
 	})
 }
 
@@ -437,9 +445,9 @@ fn native_lru_cache(mut vm VM, args []Value) Value {
 	mut cache := map[string]Value{}
 	mut keys := []string{}
 	return Value(NativeFunctionValue{
-		name:  'lru_cache_wrapper'
-		arity: -1
-		func:  fn [callee, capacity, mut cache, mut keys] (mut vm VM, args []Value) Value {
+		name:    'lru_cache_wrapper'
+		arity:   -1
+		func:    fn [callee, capacity, mut cache, mut keys] (mut vm VM, args []Value) Value {
 			key := args.str()
 			if val := cache[key] {
 				idx := keys.index(key)
@@ -468,6 +476,8 @@ fn native_lru_cache(mut vm VM, args []Value) Value {
 			}
 			return Value(NilValue{})
 		}
+		context: []Value{}
+		gc:      vm.alloc_header(int(sizeof(MapValue)))
 	})
 }
 
@@ -493,6 +503,8 @@ fn native_type(mut vm VM, args []Value) Value {
 		ResponseValue { Value('response') }
 		SocketValue { Value('socket') }
 		StreamValue { Value('stream') }
+		Upvalue { Value('upvalue') }
+		PromiseState { Value('promise_state') }
 	}
 }
 
@@ -505,10 +517,12 @@ fn native_keys(mut vm VM, args []Value) Value {
 		}
 		return Value(ArrayValue{
 			elements: ks
+			gc:       vm.alloc_header(int(sizeof(EnumVariantValue)))
 		})
 	}
 	return Value(ArrayValue{
 		elements: []Value{}
+		gc:       vm.alloc_header(int(sizeof(MapValue)))
 	})
 }
 
@@ -521,10 +535,12 @@ fn native_values(mut vm VM, args []Value) Value {
 		}
 		return Value(ArrayValue{
 			elements: vs
+			gc:       vm.alloc_header(int(sizeof(EnumVariantValue)))
 		})
 	}
 	return Value(ArrayValue{
 		elements: []Value{}
+		gc:       vm.alloc_header(int(sizeof(MapValue)))
 	})
 }
 
@@ -589,29 +605,31 @@ fn native_json_decode(mut vm VM, args []Value) Value {
 	if args[0] is string {
 		source := args[0] as string
 		raw := json2.decode[json2.Any](source) or { return Value(NilValue{}) }
-		return json_to_value(raw)
+		return json_to_value(mut vm, raw)
 	}
 	return Value(NilValue{})
 }
 
-fn json_to_value(raw json2.Any) Value {
+fn json_to_value(mut vm VM, raw json2.Any) Value {
 	match raw {
 		map[string]json2.Any {
 			mut items := map[string]Value{}
 			for k, v in raw {
-				items[k] = json_to_value(v)
+				items[k] = json_to_value(mut vm, v)
 			}
 			return Value(MapValue{
 				items: items
+				gc:    vm.alloc_header(int(sizeof(BoundMethodValue)))
 			})
 		}
 		[]json2.Any {
 			mut elements := []Value{}
 			for e in raw {
-				elements << json_to_value(e)
+				elements << json_to_value(mut vm, e)
 			}
 			return Value(ArrayValue{
 				elements: elements
+				gc:       vm.alloc_header(int(sizeof(NativeFunctionValue)))
 			})
 		}
 		string {
@@ -797,11 +815,13 @@ fn (mut vm VM) register_stdlib() {
 	vm.globals['Result'] = EnumValue{
 		name:     'Result'
 		variants: ['ok', 'err']
+		gc:       vm.alloc_header(int(sizeof(ArrayValue)))
 	}
 
 	// Option
 	vm.globals['Option'] = EnumValue{
 		name:     'Option'
 		variants: ['some', 'none']
+		gc:       vm.alloc_header(int(sizeof(MapValue)))
 	}
 }

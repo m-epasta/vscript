@@ -479,6 +479,23 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.visit_expr(expr.value)
 			t.output.write_string(')')
 		}
+		InterpolatedStringExpr {
+			t.output.write_string('`')
+			for i, part in expr.parts {
+				if i % 2 == 0 {
+					// Literal string part
+					if part is LiteralExpr {
+						t.output.write_string((part as LiteralExpr).value)
+					}
+				} else {
+					// Expression part
+					t.output.write_string('${')
+					t.visit_expr(part)
+					t.output.write_string('}')
+				}
+			}
+			t.output.write_string('`')
+		}
 	}
 }
 

@@ -3,20 +3,24 @@ module main
 
 struct Scanner {
 mut:
-	source  string
-	tokens  []Token
-	start   int
-	current int
-	line    int
+	source       string
+	tokens       []Token
+	start        int
+	current      int
+	line         int
+	interp_depth int // Number of active ${ ... } interpolations
+	brace_depth  int // Number of active { ... } blocks
 }
 
 fn new_scanner(source string) Scanner {
 	return Scanner{
-		source:  source
-		tokens:  []Token{}
-		start:   0
-		current: 0
-		line:    1
+		source:       source
+		tokens:       []Token{}
+		start:        0
+		current:      0
+		line:         1
+		interp_depth: 0
+		brace_depth:  0
 	}
 }
 
@@ -47,10 +51,17 @@ fn (mut s Scanner) scan_token() {
 			s.add_token(.right_paren)
 		}
 		`{` {
+			s.brace_depth++
 			s.add_token(.left_brace)
 		}
 		`}` {
-			s.add_token(.right_brace)
+			if s.interp_depth > 0 {
+				// Closing an interpolation expression, continue parsing string
+				s.interp_depth--
+				s.string_after_interp()
+			} else {
+				s.add_token(.right_brace)
+			}
 		}
 		`[` {
 			s.add_token(.left_bracket)
@@ -219,14 +230,44 @@ fn (mut s Scanner) number() {
 }
 
 fn (mut s Scanner) string() {
+	s.string_segment(true)
+}
+
+fn (mut s Scanner) string_after_interp() {
+	s.string_segment(false)
+}
+
+fn (mut s Scanner) string_segment(is_start bool) {
 	mut value := ''
-	for s.peek() != `"` && !s.is_at_end() {
+	for !s.is_at_end() {
+		if s.peek() == `"` {
+			s.advance()
+			if is_start {
+				s.add_token_literal(.string, value)
+			} else {
+				s.add_token_literal(.string_interp_end, value)
+			}
+			return
+		}
+
+		if s.peek() == `$` && s.peek_next() == `{` {
+			s.advance() // $
+			s.advance() // {
+			s.interp_depth++
+			if is_start {
+				s.add_token_literal(.string_interp_start, value)
+			} else {
+				s.add_token_literal(.string_interp_middle, value)
+			}
+			return
+		}
+
 		if s.peek() == `\n` {
 			s.line++
 		}
 
 		if s.peek() == `\\` {
-			s.advance() // consume \
+			s.advance()
 			match s.advance() {
 				`n` { value += '\n' }
 				`t` { value += '\t' }
@@ -240,13 +281,7 @@ fn (mut s Scanner) string() {
 		}
 	}
 
-	if s.is_at_end() {
-		s.error('Unterminated string')
-		return
-	}
-
-	s.advance() // closing "
-	s.add_token_literal(.string, value)
+	s.error('Unterminated string')
 }
 
 fn (mut s Scanner) match_char(expected u8) bool {

@@ -16,18 +16,21 @@ fn create_fs_module(mut vm VM) Value {
 					enum_name: 'Result'
 					variant:   'err'
 					values:    [Value(err.msg())]
+					gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 				})
 			}
 			return Value(EnumVariantValue{
 				enum_name: 'Result'
 				variant:   'ok'
 				values:    [Value(content)]
+				gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 			})
 		}
 		return Value(EnumVariantValue{
 			enum_name: 'Result'
 			variant:   'err'
 			values:    [Value('read_file expects a string path')]
+			gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 		})
 	})
 
@@ -41,18 +44,21 @@ fn create_fs_module(mut vm VM) Value {
 					enum_name: 'Result'
 					variant:   'err'
 					values:    [Value('Failed to write file: ${err}')]
+					gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 				})
 			}
 			return Value(EnumVariantValue{
 				enum_name: 'Result'
 				variant:   'ok'
 				values:    [Value(true)]
+				gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 			})
 		}
 		return Value(EnumVariantValue{
 			enum_name: 'Result'
 			variant:   'err'
 			values:    [Value('write_file expects (path: string, content: string)')]
+			gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 		})
 	})
 
@@ -74,22 +80,26 @@ fn create_fs_module(mut vm VM) Value {
 					enum_name: 'Result'
 					variant:   'err'
 					values:    [Value('Failed to remove file: ${err}')]
+					gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 				})
 			}
 			return Value(EnumVariantValue{
 				enum_name: 'Result'
 				variant:   'ok'
 				values:    [Value(true)]
+				gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 			})
 		}
 		return Value(EnumVariantValue{
 			enum_name: 'Result'
 			variant:   'err'
 			values:    [Value('remove expects a string path')]
+			gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 		})
 	})
 
 	return Value(MapValue{
 		items: exports
+		gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 	})
 }

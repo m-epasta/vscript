@@ -14,18 +14,21 @@ fn create_json_module(mut vm VM) Value {
 					enum_name: 'Result'
 					variant:   'err'
 					values:    [Value('Failed to parse JSON')]
+					gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 				})
 			}
 			return Value(EnumVariantValue{
 				enum_name: 'Result'
 				variant:   'ok'
 				values:    [result]
+				gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 			})
 		}
 		return Value(EnumVariantValue{
 			enum_name: 'Result'
 			variant:   'err'
 			values:    [Value('json.parse expects a string')]
+			gc:        vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 		})
 	})
 
@@ -36,5 +39,6 @@ fn create_json_module(mut vm VM) Value {
 
 	return Value(MapValue{
 		items: exports
+		gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 	})
 }

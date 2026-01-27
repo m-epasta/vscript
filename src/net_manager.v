@@ -70,6 +70,7 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 							sock_obj := SocketValue{
 								handle:   handle
 								messages: msg_chan
+								gc:       vm.alloc_header(int(sizeof(MapValue)))
 							}
 
 							mut sock_methods := map[string]Value{}
@@ -86,8 +87,10 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 								values:    [
 									Value(MapValue{
 										items: sock_methods
+										gc:    vm.alloc_header(int(sizeof(MapValue)))
 									}),
 								]
+								gc:        vm.alloc_header(int(sizeof(MapValue)))
 							})
 							state.status = .resolved
 							continue
@@ -101,6 +104,7 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 
 							stream_obj := StreamValue{
 								chunks: q
+								gc:     vm.alloc_header(int(sizeof(MapValue)))
 							}
 
 							mut stream_res := map[string]Value{}
@@ -111,6 +115,7 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 
 							resp_map['body'] = Value(MapValue{
 								items: stream_res
+								gc:    vm.alloc_header(int(sizeof(MapValue)))
 							})
 
 							state.value = Value(EnumVariantValue{
@@ -119,8 +124,10 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 								values:    [
 									Value(MapValue{
 										items: resp_map
+										gc:    vm.alloc_header(int(sizeof(MapValue)))
 									}),
 								]
+								gc:        vm.alloc_header(int(sizeof(MapValue)))
 							})
 							state.status = .resolved
 						}
@@ -191,6 +198,7 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 						}
 						resp_map['headers'] = Value(MapValue{
 							items: header_map
+							gc:    vm.alloc_header(int(sizeof(MapValue)))
 						})
 
 						vm.define_native_in_map_with_context(mut resp_map, 'json', 0,
@@ -203,12 +211,14 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 									enum_name: 'Result'
 									variant:   'err'
 									values:    [Value('Failed to parse JSON')]
+									gc:        v.alloc_header(int(sizeof(MapValue)))
 								})
 							}
 							val := Value(EnumVariantValue{
 								enum_name: 'Result'
 								variant:   'ok'
-								values:    [json_to_value(raw)]
+								values:    [json_to_value(mut v, raw)]
+								gc:        v.alloc_header(int(sizeof(MapValue)))
 							})
 							return create_resolved_promise(mut v, val)
 						})
@@ -228,8 +238,10 @@ fn (mut nm NetworkManager) poll(mut vm VM) {
 							values:    [
 								Value(MapValue{
 									items: resp_map
+									gc:    vm.alloc_header(int(sizeof(MapValue)))
 								}),
 							]
+							gc:        vm.alloc_header(int(sizeof(MapValue)))
 						})
 						state.status = .resolved
 					}
@@ -298,16 +310,19 @@ fn (mut nm NetworkManager) resolve_accept(mut vm VM, id int, conn &net.TcpConn) 
 		url:     url
 		body:    ''
 		headers: map[string]string{}
+		gc:      vm.alloc_header(int(sizeof(MapValue)))
 	})
 	res_map['response'] = Value(ResponseValue{
 		status: 200
 		handle: voidptr(conn)
+		gc:     vm.alloc_header(int(sizeof(MapValue)))
 	})
 
 	if mut state := vm.promises[id] {
 		state.status = .resolved
 		state.value = Value(MapValue{
 			items: res_map
+			gc:    vm.alloc_header(int(sizeof(MapValue)))
 		})
 	}
 }

@@ -15,6 +15,7 @@ fn create_http2_module(mut vm VM) Value {
 			mut state := &PromiseState{
 				status: .pending
 				value:  NilValue{}
+				gc:     vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 			}
 			vm.promises[id] = state
 
@@ -60,5 +61,6 @@ fn create_http2_module(mut vm VM) Value {
 
 	return Value(MapValue{
 		items: exports
+		gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 	})
 }

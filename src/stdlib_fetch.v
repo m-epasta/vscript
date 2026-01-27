@@ -13,6 +13,7 @@ fn create_fetch_module(mut vm VM) Value {
 
 	return Value(MapValue{
 		items: exports
+		gc:    vm.alloc_header(int(int(sizeof(EnumVariantValue))))
 	})
 }
 

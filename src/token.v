@@ -32,6 +32,9 @@ enum TokenType {
 	// Literals
 	identifier
 	string
+	string_interp_start  // "Hello ${" - opening part before first interpolation
+	string_interp_middle // "} world ${" - middle part between interpolations
+	string_interp_end    // "}" - closing part after last interpolation
 	number
 
 	// Keywords
