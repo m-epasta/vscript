@@ -496,6 +496,18 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			}
 			t.output.write_string('`')
 		}
+		LogicalExpr {
+			t.output.write_string('(')
+			t.visit_expr(expr.left)
+			op := if expr.operator.type_ in [.and_keyword, .ampersand_ampersand] {
+				'&&'
+			} else {
+				'||'
+			}
+			t.output.write_string(' ${op} ')
+			t.visit_expr(expr.right)
+			t.output.write_string(')')
+		}
 	}
 }
 

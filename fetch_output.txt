@@ -1,2 +1,0 @@
-OP: OP_NIL
-OP: OP_RETURN

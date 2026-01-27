@@ -1,11 +1,20 @@
 // Parser for vscript - builds AST from tokens
 module main
 
+struct ParseError {
+pub:
+	line    int
+	col     int
+	lexeme  string
+	message string
+}
+
 struct Parser {
 mut:
 	tokens       []Token
 	current      int
 	had_error    bool
+	errors       []ParseError
 	is_test_mode bool
 }
 
@@ -14,6 +23,7 @@ fn new_parser(tokens []Token, is_test_mode bool) Parser {
 		tokens:       tokens
 		current:      0
 		had_error:    false
+		errors:       []ParseError{}
 		is_test_mode: is_test_mode
 	}
 }
@@ -26,7 +36,12 @@ fn (mut p Parser) parse() ![]Stmt {
 			continue
 		}
 		stmt := p.declaration() or {
-			eprintln('[line ${p.peek().line}] Error at \'${p.peek().lexeme}\': ${err}')
+			p.errors << ParseError{
+				line:    p.peek().line
+				col:     p.peek().col
+				lexeme:  p.peek().lexeme
+				message: err.msg()
+			}
 			p.had_error = true
 			p.synchronize()
 			continue
@@ -344,7 +359,11 @@ fn (mut p Parser) for_statement() !Stmt {
 	p.consume(.left_paren, 'Expect ( after for')!
 
 	mut initializer := ?Stmt(none)
-	if !p.match_([.semicolon]) {
+	if p.match_([.semicolon]) {
+		initializer = none
+	} else if p.match_([.var_keyword]) {
+		initializer = p.var_declaration()!
+	} else {
 		initializer = p.expression_statement()!
 	}
 
@@ -559,14 +578,15 @@ fn (mut p Parser) assignment() !Expr {
 fn (mut p Parser) or_() !Expr {
 	mut expr := p.and_()!
 
-	// TODO: logical or handling
-	/*
-	for p.match_([.or_keyword]) {
+	for p.match_([.or_keyword, .pipe_pipe]) {
 		operator := p.previous()
 		right := p.and_()!
-		expr = Expr(LogicalExpr{left: expr, operator: operator, right: right})
+		expr = Expr(LogicalExpr{
+			left:     expr
+			operator: operator
+			right:    right
+		})
 	}
-	*/
 
 	return expr
 }
@@ -574,14 +594,15 @@ fn (mut p Parser) or_() !Expr {
 fn (mut p Parser) and_() !Expr {
 	mut expr := p.equality()!
 
-	// TODO: logical and handling
-	/*
-	for p.match_([.and_keyword]) {
+	for p.match_([.and_keyword, .ampersand_ampersand]) {
 		operator := p.previous()
 		right := p.equality()!
-		expr = Expr(LogicalExpr{left: expr, operator: operator, right: right})
+		expr = Expr(LogicalExpr{
+			left:     expr
+			operator: operator
+			right:    right
+		})
 	}
-	*/
 
 	return expr
 }

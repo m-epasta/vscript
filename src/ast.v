@@ -26,6 +26,7 @@ type Expr = BinaryExpr
 	| MatchExpr
 	| AwaitExpr
 	| InterpolatedStringExpr
+	| LogicalExpr
 
 struct AwaitExpr {
 	keyword Token
@@ -34,6 +35,12 @@ struct AwaitExpr {
 
 struct InterpolatedStringExpr {
 	parts []Expr
+}
+
+struct LogicalExpr {
+	left     Expr
+	operator Token
+	right    Expr
 }
 
 struct BinaryExpr {

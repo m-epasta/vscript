@@ -242,7 +242,9 @@ fn (mut vm VM) interpret(source string) InterpretResult {
 
 	mut parser := new_parser(tokens, vm.is_test_mode)
 	stmts := parser.parse() or {
-		eprintln('Parse error: ${err}')
+		for e in parser.errors {
+			eprintln('[line ${e.line}, col ${e.col}] Error at \'${e.lexeme}\': ${e.message}')
+		}
 		return .compile_error
 	}
 
@@ -1338,6 +1340,14 @@ fn (mut vm VM) import_module(path string) !Value {
 	}
 	if path == 'core/fs.vs' {
 		val := create_fs_module(mut vm)
+		return val
+	}
+	if path == 'core/os.vs' {
+		val := create_os_module(mut vm)
+		return val
+	}
+	if path == 'core/compiler.vs' {
+		val := create_compiler_module(mut vm)
 		return val
 	}
 	if path == 'core/tmpfile.vs' {

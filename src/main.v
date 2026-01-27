@@ -11,6 +11,7 @@ fn main() {
 		println('vscript v0.2.0 - JavaScript-compatible scripting language')
 		println('Usage:')
 		println('  vscript <file.vs>           Run with VM (bytecode)')
+		println('  vscript --lsp               Start vscript LSP server')
 		println('  vscript --transpile <file>  Transpile to .js file')
 		println('  vscript --js <file>         Transpile and show JS')
 		println('  vscript --scan <file>       Show tokens (debug)')
@@ -18,6 +19,9 @@ fn main() {
 	}
 
 	match args[0] {
+		'--lsp' {
+			run_lsp()
+		}
 		'--transpile', '-t' {
 			if args.len < 2 {
 				eprintln('Error: Please specify a file to transpile')
@@ -171,4 +175,9 @@ fn scan_file(path string) {
 			println(token.str())
 		}
 	}
+}
+
+fn run_lsp() {
+	source := $embed_file('../lsp.vs').to_string()
+	run_string(source, false)
 }

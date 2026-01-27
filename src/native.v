@@ -113,6 +113,12 @@ fn native_printf(mut vm VM, args []Value) Value {
 		}
 	}
 	print(res)
+	unsafe { C.fflush(C.stdout) }
+	return Value(NilValue{})
+}
+
+fn native_flush(mut vm VM, args []Value) Value {
+	unsafe { C.fflush(C.stdout) }
 	return Value(NilValue{})
 }
 
@@ -775,6 +781,7 @@ fn (mut vm VM) register_stdlib() {
 	vm.define_native('print', -1, native_print)
 	vm.define_native('println', -1, native_println)
 	vm.define_native('eprint', -1, native_eprint)
+	vm.define_native('flush', 0, native_flush)
 	vm.define_native('typeof', 1, native_type)
 	vm.define_native('to_string', 1, native_to_string)
 	vm.define_native('to_number', 1, native_to_number)

@@ -231,6 +231,9 @@ fn value_to_string(v Value) string {
 			return v.str()
 		}
 		f64 {
+			if v == f64(int(v)) {
+				return int(v).str()
+			}
 			return v.str()
 		}
 		string {

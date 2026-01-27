@@ -58,6 +58,10 @@ enum TokenType {
 	import_keyword
 	async_keyword
 	await_keyword
+	and_keyword
+	or_keyword
+	ampersand_ampersand // &&
+	pipe_pipe           // ||
 
 	// Special
 	at_bracket // @[
@@ -71,6 +75,7 @@ struct Token {
 	lexeme  string
 	literal string
 	line    int
+	col     int
 }
 
 fn (t Token) str() string {

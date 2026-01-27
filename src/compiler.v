@@ -165,6 +165,7 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			} else {
 				name_const := c.make_constant(Value(var_name))
 				c.emit_bytes(u8(OpCode.op_set_global), name_const)
+				// Note: op_set_global leaves value on stack, so we need to pop it
 				c.emit_byte(u8(OpCode.op_pop))
 			}
 		}
@@ -175,7 +176,7 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 				c.compile_stmt(initializer)!
 			}
 
-			loop_start := c.chunk.code.len
+			mut loop_start := c.chunk.code.len
 			mut exit_jump := -1
 
 			if condition := stmt.condition {
@@ -186,10 +187,11 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 
 			if increment := stmt.increment {
 				body_jump := c.emit_jump(u8(OpCode.op_jump))
-				_ := c.chunk.code.len // increment start position (not needed for simple loop)
+				increment_start := c.chunk.code.len
 				c.compile_expr(increment)!
 				c.emit_byte(u8(OpCode.op_pop))
 				c.emit_loop(loop_start)
+				loop_start = increment_start
 				c.patch_jump(body_jump)
 			}
 
@@ -222,7 +224,7 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			name_const := c.make_constant(Value(stmt.name.lexeme))
 			c.emit_bytes(u8(OpCode.op_class), name_const)
 			c.emit_bytes(u8(OpCode.op_set_global), name_const)
-
+			c.emit_byte(u8(OpCode.op_pop))
 			c.named_variable(stmt.name, false)!
 
 			old_class_type := c.class_type
@@ -282,6 +284,7 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			}
 			// Set global
 			c.emit_bytes(u8(OpCode.op_set_global), name_const)
+			c.emit_byte(u8(OpCode.op_pop))
 		}
 		EnumStmt {
 			name_const := c.make_constant(Value(stmt.name.lexeme))
@@ -293,6 +296,7 @@ fn (mut c Compiler) compile_stmt(stmt Stmt) ! {
 			}
 			// Set global
 			c.emit_bytes(u8(OpCode.op_set_global), name_const)
+			c.emit_byte(u8(OpCode.op_pop))
 		}
 	}
 }
@@ -443,6 +447,26 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 				c.emit_bytes(u8(OpCode.op_constant), c.make_constant(Value('')))
 			}
 		}
+		LogicalExpr {
+			if expr.operator.type_ == .or_keyword || expr.operator.type_ == .pipe_pipe {
+				c.compile_expr(expr.left)!
+				not_true_jump := c.emit_jump(u8(OpCode.op_jump_if_false))
+				end_jump := c.emit_jump(u8(OpCode.op_jump))
+
+				c.patch_jump(not_true_jump)
+				c.emit_byte(u8(OpCode.op_pop))
+
+				c.compile_expr(expr.right)!
+				c.patch_jump(end_jump)
+			} else { // AND
+				c.compile_expr(expr.left)!
+				end_jump := c.emit_jump(u8(OpCode.op_jump_if_false))
+
+				c.emit_byte(u8(OpCode.op_pop))
+				c.compile_expr(expr.right)!
+				c.patch_jump(end_jump)
+			}
+		}
 	}
 }
 
@@ -570,6 +594,7 @@ fn (mut c Compiler) function(stmt FunctionStmt) ! {
 
 	name_const := c.make_constant(Value(stmt.name.lexeme))
 	c.emit_bytes(u8(OpCode.op_set_global), name_const)
+	c.emit_byte(u8(OpCode.op_pop))
 }
 
 fn (mut c Compiler) compile_function(name string, params []Token, body []Stmt, type_ FunctionType, attributes []Attribute, is_async bool) ! {

@@ -8,6 +8,7 @@ mut:
 	start        int
 	current      int
 	line         int
+	line_start   int
 	interp_depth int // Number of active ${ ... } interpolations
 	brace_depth  int // Number of active { ... } blocks
 }
@@ -19,6 +20,7 @@ fn new_scanner(source string) Scanner {
 		start:        0
 		current:      0
 		line:         1
+		line_start:   0
 		interp_depth: 0
 		brace_depth:  0
 	}
@@ -35,6 +37,7 @@ fn (mut s Scanner) scan_tokens() []Token {
 		lexeme:  ''
 		literal: ''
 		line:    s.line
+		col:     s.current - s.line_start
 	}
 
 	return s.tokens
@@ -129,6 +132,7 @@ fn (mut s Scanner) scan_token() {
 		}
 		`\n` {
 			s.line++
+			s.line_start = s.current
 			// Newline acts as statement separator - insert virtual semicolon
 			if s.tokens.len > 0 {
 				last_type := s.tokens[s.tokens.len - 1].type_
@@ -136,6 +140,20 @@ fn (mut s Scanner) scan_token() {
 					.right_bracket, .true_keyword, .false_keyword, .nil_keyword, .return_keyword] {
 					s.add_token(.semicolon)
 				}
+			}
+		}
+		`&` {
+			if s.match_char(`&`) {
+				s.add_token(.ampersand_ampersand)
+			} else {
+				s.error('Unexpected character: &')
+			}
+		}
+		`|` {
+			if s.match_char(`|`) {
+				s.add_token(.pipe_pipe)
+			} else {
+				s.error('Unexpected character: |')
 			}
 		}
 		`@` {
@@ -164,6 +182,7 @@ fn (mut s Scanner) block_comment() {
 	for !s.is_at_end() {
 		if s.peek() == `\n` {
 			s.line++
+			s.line_start = s.current
 		}
 		if s.peek() == `*` && s.peek_next() == `/` {
 			s.advance() // consume *
@@ -264,6 +283,7 @@ fn (mut s Scanner) string_segment(is_start bool) {
 
 		if s.peek() == `\n` {
 			s.line++
+			s.line_start = s.current
 		}
 
 		if s.peek() == `\\` {
@@ -342,6 +362,7 @@ fn (mut s Scanner) add_token_literal(type_ TokenType, literal string) {
 		lexeme:  text
 		literal: literal
 		line:    s.line
+		col:     s.start - s.line_start
 	}
 }
 
