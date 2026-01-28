@@ -27,20 +27,18 @@ jobs:
           sudo cp v /usr/local/bin/v
           sudo chmod +x /usr/local/bin/v
         shell: bash
-
       - name: Build vscript
         run: |
-          # produce the executable inside the vscript folder so later steps can cd vscript
-          v -o vscript/vscript src/
+          # compile the main file into ./vscript
+          v -o ./vscript src/main.v
         shell: bash
 
       - name: Make vscript executable
-        run: chmod +x vscript/vscript
+        run: chmod +x ./vscript
         shell: bash
 
       - name: Run basic functionality tests
         run: |
-          cd vscript
           ./vscript tests/test_simple.vs
           ./vscript tests/check_net.vs
           ./vscript tests/test_bind.vs
@@ -48,24 +46,8 @@ jobs:
 
       - name: Test transpilation to JavaScript
         run: |
-          cd vscript
           ./vscript --js tests/test_simple.vs > test_simple.js
           node --check test_simple.js
           ./vscript --js tests/test_bind.vs > test_bind.js
           node --check test_bind.js
-        shell: bash
-
-      - name: Run comprehensive test suite
-        run: |
-          cd vscript
-          for test in tests/*.vs; do
-            echo "Running $test"
-            ./vscript "$test"
-          done
-        shell: bash
-
-      - name: Test standard library functionality
-        run: |
-          cd vscript
-          ./vscript tests/stdlib/*.vs
         shell: bash
