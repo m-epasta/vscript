@@ -1,9 +1,9 @@
 // Test maps and JSON support
 let m = {
-    name: "Alice",
-    age: 30,
+    "name": "Alice",
+    "age": 30,
     "has_pet": true,
-    data: [1, 2, 3]
+    "data": [1, 2, 3]
 };
 
 print("Map Literal:");
