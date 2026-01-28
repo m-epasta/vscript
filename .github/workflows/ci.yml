@@ -64,7 +64,8 @@ jobs:
 
       - name: Run basic functionality tests
         run: |
-          ./vscript tests/**
+          ./vscript tests/core/**
+          ./vscript tests/stdlib/**
         shell: bash
 
       - name: Test transpilation to JavaScript
