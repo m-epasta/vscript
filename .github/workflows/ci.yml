@@ -64,9 +64,6 @@ jobs:
 
       - name: Run basic functionality tests
         run: |
-          ./vscript tests/test_simple.vs
-          ./vscript tests/check_net.vs
-          ./vscript tests/test_bind.vs
           ./vscript tests/**
         shell: bash
 
