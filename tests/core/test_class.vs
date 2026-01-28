@@ -6,12 +6,12 @@ class Person {
     }
 
     say_hello() {
-        print "Hi, I'm " + this.name + " and I am " + to_string(this.age) + " years old.";
+        print("Hi, I'm " + this.name + " and I am " + to_string(this.age) + " years old.");
     }
 
     celebrate_birthday() {
         this.age = this.age + 1;
-        print "Happy birthday " + this.name + "! You are now " + to_string(this.age);
+        print("Happy birthday " + this.name + "! You are now " + to_string(this.age));
     }
 }
 
@@ -19,7 +19,7 @@ let p = Person("Alice", 30);
 p.say_hello();
 p.celebrate_birthday();
 
-print("Direct field access:");
-print(p.name);
+println("Direct field access:");
+println(p.name);
 p.city = "New York";
-print(p.city);
+println(p.city);
