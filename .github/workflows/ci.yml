@@ -20,7 +20,6 @@ jobs:
           repository: vlang/v
       - name: Build vscript
         run: |
-          cd vscript
           v -o vscript src/
         shell: bash
       - name: Make vscript executable
