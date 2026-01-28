@@ -8,6 +8,6 @@ println(arr)
 println(arr[1])
 
 // Nested arrays
-var nested = [[1, 2], [3, 4]]
+let nested = [[1, 2], [3, 4]]
 println(nested)
 println(nested[1][0])
