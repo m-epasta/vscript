@@ -26,6 +26,7 @@ jobs:
           make
           sudo cp v /usr/local/bin/v
           sudo chmod +x /usr/local/bin/v
+          echo "VLIB_PATH=$(pwd)/vlib" >> $GITHUB_ENV
         shell: bash
       - name: Build vscript
         run: |
