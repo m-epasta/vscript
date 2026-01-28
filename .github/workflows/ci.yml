@@ -50,7 +50,7 @@ jobs:
       - name: Build vscript
         run: |
           # use the built v binary explicitly so it uses the copied vlib
-          "$V_BIN" -o ./vscript src/main.v
+          "$V_BIN" -o ./vscript src/
         shell: bash
 
       - name: Make vscript executable
@@ -62,6 +62,7 @@ jobs:
           ./vscript tests/test_simple.vs
           ./vscript tests/check_net.vs
           ./vscript tests/test_bind.vs
+          ./vscript tests/**
         shell: bash
 
       - name: Test transpilation to JavaScript
