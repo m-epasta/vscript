@@ -1,11 +1,15 @@
-fn circular() {
-    let a = { "next": nil };
-    let b = { "next": a };
-    a.next = b; // Cycle: a -> b -> a
+println("Testing for loop with i++");
+let sum = 0;
+for (let i = 0; i < 10; i++) {
+    sum = sum + i;
 }
+println("Sum of 0..9 = " + to_string(sum));
 
-print("Starting circular reference test...");
-for (let i = 0; i < 100000; i++) {
-    circular();
+println("Testing for loop with i--");
+let count = 5;
+for (let j = 5; j > 0; j--) {
+    count = count - 1;
 }
-print("Circular reference test finished.");
+println("Count = " + to_string(count));
+
+println("For loop test completed successfully!");

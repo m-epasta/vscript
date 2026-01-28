@@ -331,6 +331,51 @@ fn (mut c Compiler) compile_expr(expr Expr) ! {
 				else {}
 			}
 		}
+		PostfixExpr {
+			// Postfix operators like i++ and i--
+			// For simplicity, we treat i++ as (temp = i, i = i + 1, temp)
+			
+			// First, get the variable name
+			if expr.left is VariableExpr {
+				var_expr := expr.left as VariableExpr
+				var_name := var_expr.name.lexeme
+				
+				// Load the variable value (original)
+				c.named_variable(var_expr.name, false)!
+				
+				// Duplicate it on the stack
+				c.emit_byte(u8(OpCode.op_duplicate))
+				
+				// Push 1
+				c.emit_constant(Value(f64(1)))
+				
+				// Perform operation to get new value
+				match expr.operator.type_ {
+					.plus_plus { c.emit_byte(u8(OpCode.op_add)) }
+					.minus_minus { c.emit_byte(u8(OpCode.op_subtract)) }
+					else {}
+				}
+				
+				// Now stack has: [original, new_value]
+				// Store new value in variable
+				mut is_local := false
+				for i, local in c.locals[0..c.local_count] {
+					if local.name == var_name && local.depth != -1 {
+						is_local = true
+						c.emit_bytes(u8(OpCode.op_set_local), u8(i))
+						break
+					}
+				}
+				if !is_local {
+					name_const := c.make_constant(Value(var_name))
+					c.emit_bytes(u8(OpCode.op_set_global), name_const)
+				}
+				
+				// The original value remains on stack for use
+			} else {
+				eprintln('Postfix operators only work on variables')
+			}
+		}
 		LiteralExpr {
 			match expr.type_ {
 				.number {

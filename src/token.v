@@ -28,6 +28,8 @@ enum TokenType {
 	greater_equal // >=
 	less          // <
 	less_equal    // <=
+	plus_plus     // ++
+	minus_minus   // --
 
 	// Literals
 	identifier

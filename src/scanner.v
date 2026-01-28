@@ -79,10 +79,10 @@ fn (mut s Scanner) scan_token() {
 			s.add_token(.dot)
 		}
 		`-` {
-			s.add_token(.minus)
+			s.add_token(if s.match_char(`-`) { .minus_minus } else { .minus })
 		}
 		`+` {
-			s.add_token(.plus)
+			s.add_token(if s.match_char(`+`) { .plus_plus } else { .plus })
 		}
 		`;` {
 			s.add_token(.semicolon)

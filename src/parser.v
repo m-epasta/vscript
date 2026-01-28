@@ -745,6 +745,12 @@ fn (mut p Parser) call() !Expr {
 				object: expr
 				index:  index
 			})
+		} else if p.match_([.plus_plus, .minus_minus]) {
+			operator := p.previous()
+			expr = Expr(PostfixExpr{
+				left:     expr
+				operator: operator
+			})
 		} else {
 			break
 		}

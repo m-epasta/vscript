@@ -10,6 +10,7 @@ struct Attribute {
 // Expression types
 type Expr = BinaryExpr
 	| UnaryExpr
+	| PostfixExpr
 	| LiteralExpr
 	| GroupingExpr
 	| VariableExpr
@@ -52,6 +53,11 @@ struct BinaryExpr {
 struct UnaryExpr {
 	operator Token
 	right    Expr
+}
+
+struct PostfixExpr {
+	left     Expr
+	operator Token
 }
 
 struct LiteralExpr {

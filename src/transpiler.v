@@ -294,6 +294,10 @@ fn (mut t Transpiler) visit_expr(expr Expr) {
 			t.visit_expr(expr.right)
 			t.output.write_string(')')
 		}
+		PostfixExpr {
+			t.visit_expr(expr.left)
+			t.output.write_string(expr.operator.lexeme)
+		}
 		LiteralExpr {
 			if expr.type_ == .string {
 				t.output.write_string('"')
