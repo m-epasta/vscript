@@ -100,6 +100,88 @@ fn new_vm() VM {
 	return vm
 }
 
+// Direct call variant that bypasses decorator handling on closures
+fn (mut vm VM) call_value_direct(callee Value, arg_count int) bool {
+	match callee {
+		ClosureValue {
+			if arg_count != callee.function.arity {
+				if vm.runtime_error('Expected ${callee.function.arity} arguments but got ${arg_count}') {
+					return true
+				}
+				return false
+			}
+			if !vm.call_closure(callee, arg_count) {
+				return false
+			}
+			return true
+		}
+		NativeFunctionValue {
+			if callee.arity != -1 && arg_count != callee.arity {
+				if vm.runtime_error('Expected ${callee.arity} arguments but got ${arg_count}') {
+					return true
+				}
+				return false
+			}
+
+			mut args := []Value{cap: arg_count}
+			for i := 0; i < arg_count; i++ {
+				args << vm.peek(arg_count - 1 - i)
+			}
+
+			// Save old context and set new one
+			old_context := vm.current_native_context
+			vm.current_native_context = callee.context
+
+			result := callee.func(mut vm, args)
+
+			// Restore context
+			vm.current_native_context = old_context
+
+			if vm.recovering {
+				return true
+			}
+
+			for _ in 0 .. arg_count + 1 {
+				vm.pop()
+			}
+
+			vm.push(result)
+			return true
+		}
+		FunctionValue {
+			closure := ClosureValue{
+				function: callee
+				upvalues: []&Upvalue{}
+				gc:       vm.alloc_header(int(sizeof(StructInstanceValue)))
+			}
+			if !vm.call_closure(closure, arg_count) {
+				return false
+			}
+			return true
+		}
+		ClassValue {
+			slot := vm.stack.len - arg_count - 1
+			vm.stack[slot] = InstanceValue{
+				class:  callee
+				fields: map[string]Value{}
+				gc:     vm.alloc_header(int(sizeof(ClassValue)))
+			}
+
+			if initializer := callee.methods['init'] {
+				return vm.call_value_direct(initializer, arg_count)
+			} else if arg_count != 0 {
+				if vm.runtime_error('Expected 0 arguments but got ${arg_count}') {
+					return true
+				}
+				return false
+			}
+			return true
+		}
+		else {
+			return false
+		}
+	}
+}
 fn native_stream_read(mut vm VM, args []Value) Value {
 	stream := vm.current_native_context[0] as StreamValue
 	id := vm.next_promise_id
@@ -512,10 +594,6 @@ fn (mut vm VM) run(target_frame_count int) InterpretResult {
 				slots := vm.frames[f_idx].slots
 				vm.close_upvalues(slots)
 				vm.frame_count--
-				if vm.frame_count == target_frame_count {
-					vm.stack.trim(slots)
-					return .ok
-				}
 				vm.stack.trim(slots)
 				vm.push(result)
 			}
@@ -1107,6 +1185,44 @@ fn (mut vm VM) close_upvalues(last_slot int) {
 fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 	match callee {
 		ClosureValue {
+			// Check if this closure is a decorated function (has attributes)
+			if callee.function.attributes.len > 0 {
+				if 'lru_cache' in callee.function.attributes || 'memoize' in callee.function.attributes {
+					// For decorated functions, call the decorator function
+					mut args := []Value{cap: arg_count + 1}
+					args << callee // The original function
+					for i := 0; i < arg_count; i++ {
+						args << vm.peek(arg_count - 1 - i)
+					}
+
+					// Find the appropriate decorator function
+					decorator_name := if 'lru_cache' in callee.function.attributes { 'lru_cache' } else { 'memoize' }
+					if decorator_val := vm.globals[decorator_name] {
+						if decorator_val is NativeFunctionValue {
+							decorator := decorator_val as NativeFunctionValue
+							// Call the decorator with the function and arguments
+							old_context := vm.current_native_context
+							vm.current_native_context = decorator.context
+
+							result := decorator.func(mut vm, args)
+
+							vm.current_native_context = old_context
+
+							if vm.recovering {
+								return true
+							}
+
+							for _ in 0 .. arg_count + 1 {
+								vm.pop()
+							}
+
+							vm.push(result)
+							return true
+						}
+					}
+				}
+			}
+
 			if arg_count != callee.function.arity {
 				if vm.runtime_error('Expected ${callee.function.arity} arguments but got ${arg_count}') {
 					return true
@@ -1268,6 +1384,12 @@ fn (mut vm VM) pop() Value {
 		println('POP: ${vm.typeof(val)}')
 	}
 	return val
+}
+
+fn (mut vm VM) pop_n(n int) {
+	for _ in 0 .. n {
+		vm.pop()
+	}
 }
 
 fn (vm &VM) peek(distance int) Value {

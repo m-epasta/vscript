@@ -417,28 +417,67 @@ fn native_last(mut vm VM, args []Value) Value {
 }
 
 fn native_memoize(mut vm VM, args []Value) Value {
+	if args.len == 0 {
+		return Value(NilValue{})
+	}
+
 	callee := args[0]
 	mut cache := map[string]Value{}
+	
+	// Return a wrapper function that implements caching
 	return Value(NativeFunctionValue{
-		name:    'memoized_wrapper'
+		name:    'memoize_wrapper'
 		arity:   -1
-		func:    fn [callee, mut cache] (mut vm VM, args []Value) Value {
-			key := args.str()
-			if val := cache[key] {
-				return val
+		func:    fn [callee, mut cache] (mut vm VM, wrapper_args []Value) Value {
+			// Generate cache key from arguments
+			key := wrapper_args.str()
+			
+			// Check cache
+			if cached := cache[key] {
+				return cached
 			}
-			vm.push(callee)
-			for a in args {
-				vm.push(a)
+			
+			// Not in cache - create a clean function copy WITHOUT decorator attributes
+			// This prevents the decorator from being re-applied
+			mut clean_callee := callee
+			
+			if callee is ClosureValue {
+				old_closure := callee as ClosureValue
+				clean_func := FunctionValue{
+					arity: old_closure.function.arity
+					upvalues_count: old_closure.function.upvalues_count
+					chunk: old_closure.function.chunk
+					name: old_closure.function.name
+					attributes: []string{}  // NO decorators - critical!
+				}
+				clean_callee = ClosureValue{
+					function: clean_func
+					upvalues: old_closure.upvalues.clone()
+					gc: vm.alloc_header(int(sizeof(ClosureValue)))
+				}
 			}
+			
+			// Now push clean_callee and args to stack
+			vm.push(clean_callee)
+			for arg in wrapper_args {
+				vm.push(arg)
+			}
+			
 			initial_frames := vm.frame_count
-			if vm.call_value(callee, args.len) {
-				vm.run(initial_frames)
-				res := vm.pop()
-				cache[key] = res
-				return res
+			arg_count := wrapper_args.len
+			
+			// Use call_value to properly handle the call
+			if !vm.call_value(clean_callee, arg_count) {
+				return Value(NilValue{})
 			}
-			return Value(NilValue{})
+			
+			// Run the function
+			vm.run(initial_frames)
+			
+			// Pop the result
+			res := vm.pop()
+			cache[key] = res
+			return res
 		}
 		context: []Value{}
 		gc:      vm.alloc_header(int(sizeof(MapValue)))
@@ -446,41 +485,84 @@ fn native_memoize(mut vm VM, args []Value) Value {
 }
 
 fn native_lru_cache(mut vm VM, args []Value) Value {
+	if args.len == 0 {
+		return Value(NilValue{})
+	}
+
 	callee := args[0]
 	capacity := if args.len > 1 && args[1] is f64 { int(args[1] as f64) } else { 100 }
 	mut cache := map[string]Value{}
 	mut keys := []string{}
+	
+	// Return a wrapper function that implements LRU caching
 	return Value(NativeFunctionValue{
 		name:    'lru_cache_wrapper'
 		arity:   -1
-		func:    fn [callee, capacity, mut cache, mut keys] (mut vm VM, args []Value) Value {
-			key := args.str()
-			if val := cache[key] {
+		func:    fn [callee, capacity, mut cache, mut keys] (mut vm VM, wrapper_args []Value) Value {
+			// Generate cache key from arguments
+			key := wrapper_args.str()
+			
+			// Check cache
+			if cached := cache[key] {
+				// Move to end (most recently used)
 				idx := keys.index(key)
 				if idx != -1 {
 					keys.delete(idx)
 				}
 				keys << key
-				return val
+				return cached
 			}
-			vm.push(callee)
-			for a in args {
-				vm.push(a)
-			}
-			initial_frames := vm.frame_count
-			if vm.call_value(callee, args.len) {
-				vm.run(initial_frames)
-				res := vm.pop()
-				cache[key] = res
-				keys << key
-				if keys.len > capacity {
-					oldest := keys[0]
-					cache.delete(oldest)
-					keys.delete(0)
+			
+			// Not in cache - create a clean function copy WITHOUT decorator attributes
+			// This prevents the decorator from being re-applied
+			mut clean_callee := callee
+			
+			if callee is ClosureValue {
+				old_closure := callee as ClosureValue
+				clean_func := FunctionValue{
+					arity: old_closure.function.arity
+					upvalues_count: old_closure.function.upvalues_count
+					chunk: old_closure.function.chunk
+					name: old_closure.function.name
+					attributes: []string{}  // NO decorators - critical!
 				}
-				return res
+				clean_callee = ClosureValue{
+					function: clean_func
+					upvalues: old_closure.upvalues.clone()
+					gc: vm.alloc_header(int(sizeof(ClosureValue)))
+				}
 			}
-			return Value(NilValue{})
+			
+			// Now push clean_callee and args to stack
+			vm.push(clean_callee)
+			for arg in wrapper_args {
+				vm.push(arg)
+			}
+			
+			initial_frames := vm.frame_count
+			arg_count := wrapper_args.len
+			
+			// Use call_value to properly handle the call
+			if !vm.call_value(clean_callee, arg_count) {
+				return Value(NilValue{})
+			}
+			
+			// Run the function
+			vm.run(initial_frames)
+			
+			// Pop the result
+			res := vm.pop()
+			cache[key] = res
+			keys << key
+			
+			// Evict oldest if over capacity
+			if keys.len > capacity {
+				oldest := keys[0]
+				cache.delete(oldest)
+				keys.delete(0)
+			}
+			
+			return res
 		}
 		context: []Value{}
 		gc:      vm.alloc_header(int(sizeof(MapValue)))
