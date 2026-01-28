@@ -26,3 +26,4 @@ if (typeof(bind_res) != "map") {
         }
     }
 }
+// .vss to skip CI test
