@@ -138,7 +138,24 @@ fn (mut p Parser) var_declaration() !Stmt {
 		initializer = p.expression()!
 	}
 
-	p.consume(.semicolon, 'Expect ; after variable declaration')!
+	// Try to consume semicolon, but don't fail if it's missing (ASI will handle it)
+	if !p.match_([.semicolon]) {
+		// If we don't have a semicolon, we need to ensure we're at a valid statement boundary
+		// The scanner should have inserted a virtual semicolon via ASI if appropriate
+		if !p.check(.eof) && !p.check(.right_brace) && !p.check(.right_bracket) {
+			// Look ahead to see if the next token would be valid after a variable declaration
+			next := p.peek()
+			if next.type_ in [.identifier, .number, .string, .left_paren, .left_brace, .left_bracket,
+				.true_keyword, .false_keyword, .nil_keyword, .return_keyword, .if_keyword, .while_keyword,
+				.for_keyword, .fn_keyword, .class_keyword, .struct_keyword, .enum_keyword, .match_keyword,
+				.try_keyword, .import_keyword, .async_keyword] {
+				// This looks like a valid statement start, so ASI should have inserted a semicolon
+				// If we get here without a semicolon, it means ASI didn't trigger, so we need to error
+				return error('Expect ; after variable declaration')
+			}
+		}
+	}
+	
 	return Stmt(VarStmt{
 		name:        name
 		initializer: initializer
@@ -515,7 +532,23 @@ fn (mut p Parser) import_statement() !Stmt {
 
 fn (mut p Parser) expression_statement() !Stmt {
 	expr := p.expression()!
-	p.consume(.semicolon, 'Expect ; after expression')!
+	// Try to consume semicolon, but don't fail if it's missing (ASI will handle it)
+	if !p.match_([.semicolon]) {
+		// If we don't have a semicolon, we need to ensure we're at a valid statement boundary
+		// The scanner should have inserted a virtual semicolon via ASI if appropriate
+		if !p.check(.eof) && !p.check(.right_brace) && !p.check(.right_bracket) {
+			// Look ahead to see if the next token would be valid after an expression statement
+			next := p.peek()
+			if next.type_ in [.identifier, .number, .string, .left_paren, .left_brace, .left_bracket,
+				.true_keyword, .false_keyword, .nil_keyword, .return_keyword, .if_keyword, .while_keyword,
+				.for_keyword, .fn_keyword, .class_keyword, .struct_keyword, .enum_keyword, .match_keyword,
+				.try_keyword, .import_keyword, .async_keyword, .let_keyword] {
+				// This looks like a valid statement start, so ASI should have inserted a semicolon
+				// If we get here without a semicolon, it means ASI didn't trigger, so we need to error
+				return error('Expect ; after expression')
+			}
+		}
+	}
 	return Stmt(ExprStmt{
 		expression: expr
 	})

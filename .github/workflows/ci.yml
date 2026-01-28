@@ -62,10 +62,24 @@ jobs:
         run: chmod +x ./vscript
         shell: bash
 
-      - name: Run basic functionality tests
+      - name: Run all test suites
         run: |
-          ./vscript tests/core/**
-          ./vscript tests/stdlib/**
+          # Run tests from all directories that contain .vs files
+          for dir in tests/core tests/stdlib tests/std_types; do
+            if [ -d "$dir" ] && [ "$(ls -A $dir/*.vs 2>/dev/null | wc -l)" -gt 0 ]; then
+              echo "Running tests from $dir..."
+              for test_file in $dir/*.vs; do
+                echo "  Running $test_file..."
+                ./vscript "$test_file"
+                if [ $? -ne 0 ]; then
+                  echo "FAILED: $test_file"
+                  exit 1
+                fi
+              done
+            else
+              echo "No test files found in $dir"
+            fi
+          done
         shell: bash
 
       - name: Test transpilation to JavaScript

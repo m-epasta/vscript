@@ -5,7 +5,7 @@ fn fib(n) {
 }
 
 let start = clock()
-println(fib(30))
+println(fib(5))
 let end = clock()
 println("Without caching: ${to_string(end - start)}")
 

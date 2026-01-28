@@ -137,7 +137,7 @@ fn (mut s Scanner) scan_token() {
 			if s.tokens.len > 0 {
 				last_type := s.tokens[s.tokens.len - 1].type_
 				if last_type in [.identifier, .number, .string, .right_paren, .right_brace,
-					.right_bracket, .true_keyword, .false_keyword, .nil_keyword, .return_keyword] {
+					.right_bracket, .true_keyword, .false_keyword, .nil_keyword, .return_keyword, .let_keyword] {
 					s.add_token(.semicolon)
 				}
 			}
