@@ -1,10 +1,10 @@
 name: CI
 
 on:
-    push:
-        paths-ignore: ['**/*.md', '^\.*', 'LICENSE']
-    pull_request:
-        paths-ignore: ['**/*.md', '^\.*', 'LICENSE']
+  push:
+    paths-ignore: ['**/*.md', '^\.*', 'LICENSE']
+  pull_request:
+    paths-ignore: ['**/*.md', '^\.*', 'LICENSE']
 
 jobs:
   build:
@@ -14,57 +14,60 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-    - name: Checkout V (vlang/v) into subfolder
-      uses: actions/checkout@v4
-      with:
-        repository: vlang/v
-        path: v
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Build V compiler
-      run: |
-        # build V in the checked-out v repo
-        cd v
-        make
-        # copy the vlib that matches this built compiler into the workspace
-        cp -r vlib "$GITHUB_WORKSPACE/vlib"
-        # make the built v binary executable (correct relative path)
-        chmod +x ./v
-        # export VLIB_PATH and V_BIN for later steps
-        echo "VLIB_PATH=$GITHUB_WORKSPACE/vlib" >> $GITHUB_ENV
-        echo "V_BIN=$GITHUB_WORKSPACE/v/v" >> $GITHUB_ENV
-      shell: bash
+      - name: Checkout V (vlang/v) into subfolder
+        uses: actions/checkout@v4
+        with:
+          repository: vlang/v
+          path: v
 
-    - name: Verify V environment (debug)
-      run: |
-        echo "which v (system):" ; which v || true
-        echo "V_BIN: $V_BIN"
-        echo "VLIB_PATH: $VLIB_PATH"
-        echo "v binary info:" ; file "$V_BIN" || true
-        echo "v -v (built binary):" ; "$V_BIN" -v || true
-        echo "vlib builtin listing:" ; ls -la "$VLIB_PATH/builtin" || true
-      shell: bash
+      - name: Build V compiler
+        run: |
+          # build V in the checked-out v repo
+          cd v
+          make
+          # copy the vlib that matches this built compiler into the workspace
+          cp -r vlib "$GITHUB_WORKSPACE/vlib"
+          # make the built v binary executable (correct relative path)
+          chmod +x ./v
+          # export VLIB_PATH and V_BIN for later steps
+          echo "VLIB_PATH=$GITHUB_WORKSPACE/vlib" >> $GITHUB_ENV
+          echo "V_BIN=$GITHUB_WORKSPACE/v/v" >> $GITHUB_ENV
+        shell: bash
 
-    - name: Build vscript
-      run: |
-        # use the built v binary explicitly so it uses the copied vlib
-        "$V_BIN" -o ./vscript src/main.v
-      shell: bash
+      - name: Verify V environment (debug)
+        run: |
+          echo "which v (system):" ; which v || true
+          echo "V_BIN: $V_BIN"
+          echo "VLIB_PATH: $VLIB_PATH"
+          echo "v binary info:" ; file "$V_BIN" || true
+          echo "v -v (built binary):" ; "$V_BIN" -v || true
+          echo "vlib builtin listing:" ; ls -la "$VLIB_PATH/builtin" || true
+        shell: bash
 
-    - name: Make vscript executable
-      run: chmod +x ./vscript
-      shell: bash
+      - name: Build vscript
+        run: |
+          # use the built v binary explicitly so it uses the copied vlib
+          "$V_BIN" -o ./vscript src/main.v
+        shell: bash
 
-    - name: Run basic functionality tests
-      run: |
-        ./vscript tests/test_simple.vs
-        ./vscript tests/check_net.vs
-        ./vscript tests/test_bind.vs
-      shell: bash
+      - name: Make vscript executable
+        run: chmod +x ./vscript
+        shell: bash
 
-    - name: Test transpilation to JavaScript
-      run: |
-        ./vscript --js tests/test_simple.vs > test_simple.js
-        node --check test_simple.js
-        ./vscript --js tests/test_bind.vs > test_bind.js
-        node --check test_bind.js
-      shell: bash
+      - name: Run basic functionality tests
+        run: |
+          ./vscript tests/test_simple.vs
+          ./vscript tests/check_net.vs
+          ./vscript tests/test_bind.vs
+        shell: bash
+
+      - name: Test transpilation to JavaScript
+        run: |
+          ./vscript --js tests/test_simple.vs > test_simple.js
+          node --check test_simple.js
+          ./vscript --js tests/test_bind.vs > test_bind.js
+          node --check test_bind.js
+        shell: bash
