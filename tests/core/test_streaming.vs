@@ -3,23 +3,23 @@ fn test_http_streaming() {
     import core:http
     
     print("Requesting large file stream...");
-    var promise = http.request("https://jsonplaceholder.typicode.com/photos", {
+    let promise = http.request("https://jsonplaceholder.typicode.com/photos", {
         "stream": true
     });
     
-    var res_result = await promise;
+    let res_result = await promise;
     assert(res_result.is_ok(), "Fetch failed");
     
-    var res = res_result.unwrap();
+    let res = res_result.unwrap();
     print("Handshake OK! Protocol: " + res.protocol);
     assert_eq(res.status, 200);
     
-    var stream = res.body;
-    var total_len = 0;
-    var chunks = 0;
+    let stream = res.body;
+    let total_len = 0;
+    let chunks = 0;
     
     while (!stream.is_closed()) {
-        var chunk = await stream.read();
+        let chunk = await stream.read();
         
         if (chunk != nil) {
             total_len = total_len + len(chunk);

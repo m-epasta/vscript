@@ -8,7 +8,7 @@ fn test_addition() {
 
 @[test]
 fn test_string_concat() {
-    var s = "hello " + "world";
+    let s = "hello " + "world";
     assert_eq(s, "hello world");
 }
 
@@ -18,7 +18,7 @@ fn helper() {
 
 @[test]
 fn test_helper_call() {
-    var res = helper();
+    let res = helper();
     assert_eq(res, 42);
 }
 
@@ -37,6 +37,6 @@ fn test_cfg() {
     // This function should exist only in test mode
     // We can't easily check for existence dynamically yet without reflection on globals map
     // effectively, if this code compiles and runs, we are good.
-    var s = test_only_helper();
+    let s = test_only_helper();
     assert_eq(s, "test mode only");
 }

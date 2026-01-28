@@ -1,0 +1,56 @@
+name: CI
+
+on:
+    push:
+        paths-ignore: ['**/*.md', '^\.*', 'LICENSE']
+    pull_request:
+        paths-ignore: ['**/*.md', '^\.*', 'LICENSE']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout V
+        uses: actions/checkout@v4
+        with:
+          repository: vlang/v
+      - name: Build vscript
+        run: |
+          cd vscript
+          v -o vscript src/
+        shell: bash
+      - name: Make vscript executable
+        run: chmod +x vscript/vscript
+        shell: bash
+      - name: Run basic functionality tests
+        run: |
+          cd vscript
+          ./vscript tests/test_simple.vs
+          ./vscript tests/check_net.vs
+          ./vscript tests/test_bind.vs
+        shell: bash
+      - name: Test transpilation to JavaScript
+        run: |
+          cd vscript
+          ./vscript --js tests/test_simple.vs > test_simple.js
+          node -c test_simple.js
+          ./vscript --js tests/test_bind.vs > test_bind.js
+          node -c test_bind.js
+        shell: bash
+      - name: Run comprehensive test suite
+        run: |
+          cd vscript
+          for test in tests/*.vs; do
+            echo "Running $test"
+            ./vscript "$test"
+          done
+        shell: bash
+      - name: Test standard library functionality
+        run: |
+          cd vscript
+          ./vscript tests/stdlib/*.vs
+        shell: bash

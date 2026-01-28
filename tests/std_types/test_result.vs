@@ -10,9 +10,9 @@ fn safe_div(a, b) {
 
 // 1. Test basic construction and printing
 println("Testing Result construction:");
-var r1 = safe_div(10, 2);
-var r2 = safe_div(10, 0);
-println(r1); // Should show variant
+let r1 = safe_div(10, 2);
+let r2 = safe_div(10, 0);
+println(r1); // Should show letiant
 println(r2);
 
 // 2. Test helper methods
@@ -20,7 +20,7 @@ println("\nTesting helper methods:");
 println("r1.is_ok(): " + to_string(r1.is_ok()));
 println("r2.is_err(): " + to_string(r2.is_err()));
 
-var val = r1.unwrap();
+let val = r1.unwrap();
 println("r1.unwrap(): " + to_string(val));
 
 // 3. Test expect (should panic on err)
@@ -30,7 +30,7 @@ println("r1.unwrap(): " + to_string(val));
 println("\nTesting match expression:");
 
 fn print_result(res) {
-    var output = match res {
+    let output = match res {
         Result.ok(v) => "Success: " + to_string(v),
         Result.err(e) => "Error: " + e,
         _ => "Unknown result"
@@ -49,8 +49,8 @@ enum Option {
 }
 */
 
-var opt = Option.some(42);
-var empty = Option.none;
+let opt = Option.some(42);
+let empty = Option.none;
 
 val = match opt {
     Option.some(x) => x * 2,

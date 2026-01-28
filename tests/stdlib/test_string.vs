@@ -24,7 +24,7 @@ fn test_len() {
 
 @[test]
 fn test_slice() {
-    var s = "hello world";
+    let s = "hello world";
     assert_eq(slice(s, 0, 5), "hello");
     assert_eq(slice(s, 6, 11), "world");
 }

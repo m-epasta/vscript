@@ -2,17 +2,17 @@
 
 @[test]
 fn test_encode_decode() {
-    var obj = {
+    let obj = {
         "name": "vscript",
         "version": 1,
         "features": ["simple", "fast"]
     };
 
-    var json_str = json_encode(obj);
+    let json_str = json_encode(obj);
     // JSON string order is not guaranteed, so checking exact string match is flaky.
     // Instead, decode it back and check properties.
     
-    var decoded = json_decode(json_str);
+    let decoded = json_decode(json_str);
     
     assert_eq(decoded["name"], "vscript");
     assert_eq(decoded["version"], 1);

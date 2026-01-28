@@ -1,5 +1,5 @@
 // Array test script
-var arr = [1, 2, 3]
+let arr = [1, 2, 3]
 println(arr)
 println(arr[1])
 

@@ -4,10 +4,10 @@ fn fib(n) {
     return fib(n - 1) + fib(n - 2)
 }
 
-var start = clock()
+let start = clock()
 println(fib(30))
-var end = clock()
-println("Without caching: " + to_string(end - start))
+let end = clock()
+println("Without caching: ${to_string(end - start)}")
 
 // with Caching
 @[lru_cache]
@@ -16,7 +16,7 @@ fn fib_cached(n) {
     return fib_cached(n - 1) + fib_cached(n - 2)
 }
 
-var start = clock()
+let start = clock()
 println(fib_cached(30))
-var end = clock()
-println("Without caching: " + to_string(end - start))
+let end = clock()
+println("With caching: ${to_string(end - start)}")

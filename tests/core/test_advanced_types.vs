@@ -1,6 +1,6 @@
 @[metadata: "tag"]
 fn test_attr() {
-    println("Metadata function executed.");
+    println("Metadata function executed.")
 }
 
 test_attr();
@@ -17,17 +17,15 @@ enum Color {
     blue
 }
 
-println("Advanced type syntax parsed successfully.");
+println("Advanced type syntax parsed successfully.")
 
-var p = Point();
-println("Struct instance created.");
-println("p.x default: " + to_string(p.x));
-println("p.label default: " + p.label);
+let p = Point();
+println("Struct instance created.")
+println("p.x default: ${to_string(p.x)}")
+println("p.label default: ${to_string(p.label)}")
 
 p.x = 42.0;
-println("p.x adjusted: " + to_string(p.x));
+println("p.x adjusted: ${to_string(p.x)}")
 
-println("Enum access:");
-println(Color.red);
-println(Color.green);
-println(Color.blue);
+
+print("Enum access:\n ${Color.green}\n ${Color.green}\n ${Color.blue}")

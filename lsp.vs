@@ -3,8 +3,8 @@ import core:json as json
 import core:compiler as compiler
 
 fn send_response(obj) {
-    var content = json.stringify(obj);
-    var header = "Content-Length: " + len(content) + "\r\n\r\n";
+    var content = json.stringify(obj)
+    var header = "Content-Length: ${len(content)} \r\n\r\n"
     os.stdout_write(header + content);
 }
 

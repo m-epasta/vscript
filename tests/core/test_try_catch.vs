@@ -1,10 +1,10 @@
 @[test]
 fn test_catch_panic() {
-    var caught = false;
-    var msg = "";
+    let caught = false;
+    let msg = "";
     try {
         // Trigger runtime error: calling a number
-        var x = 1;
+        let x = 1;
         x();
     } catch (e) {
         caught = true;
@@ -17,10 +17,10 @@ fn test_catch_panic() {
 
 @[test]
 fn test_execution_continues() {
-    var step = 0;
+    let step = 0;
     try {
         step = 1;
-        var x = 1;
+        let x = 1;
         x(); // panic
         step = 2; // Should skip
     } catch (e) {
@@ -31,10 +31,10 @@ fn test_execution_continues() {
 
 @[test]
 fn test_nested_catch() {
-    var log = "";
+    let log = "";
     try {
         try {
-            var x = 1;
+            let x = 1;
             x(); // panic
         } catch (e) {
             log = log + "inner";
@@ -49,7 +49,7 @@ fn test_nested_catch() {
 @[test]
 fn test_catch_binding() {
     try {
-        var x = 1;
+        let x = 1;
         x();
     } catch (err) {
         assert(len(err) > 0, "Error message should not be empty");

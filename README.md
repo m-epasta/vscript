@@ -6,8 +6,6 @@ A **lightning-fast**, JavaScript-compatible scripting language implemented in pu
 
 - ⚡ **Bytecode VM**: Zero-overhead execution with a custom stack-based virtual machine.
 - ✅ **JS Transpiler**: Portable code generation for browser and Node.js environments.
-- 🛠️ **Stdlib**: Comprehensive built-ins for math, arrays, functional iteration, and caching (LRU).
-- 🧩 **Closures**: First-class anonymous functions and lexical scoping.
 - 🚀 **One-Binary**: Highly portable, zero-dependency implementation.
 
 ## Quick Start
@@ -18,7 +16,7 @@ v -o vscript src/
 
 ### Usage
 - **Run script**: `./vscript tests/test_advanced.vs`
-- **Execute inline**: `./vscript -e "print(1 + 2);"`
+- **Execute inline**: `./vscript -e "print(1 + 2)"`
 - **Transpile**: `./vscript --js tests/test_array.vs`
 
 ## Project Structure

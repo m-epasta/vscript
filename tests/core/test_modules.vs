@@ -1,13 +1,13 @@
 @[test]
 fn test_simple_import() {
-    // Import using string literal (maps to variable 'module_a' from filename)
-    // Note: The variable name derivation logic is "module_a" from "module_a.vs"
+    // Import using string literal (maps to letiable 'module_a' from filename)
+    // Note: The letiable name derivation logic is "module_a" from "module_a.vs"
     import "tests/core/module_a.vs";
     
     // Check exports
     // Accessing exported map
     assert_eq(module_a.add(1, 2), 3);
-    assert_eq(module_a.mod_var, "loaded");
+    assert_eq(module_a.mod_let, "loaded");
 }
 
 @[test]
@@ -31,6 +31,6 @@ fn test_module_caching() {
     
     // Modify one (if maps are ref, should affect other if cached?)
     // Actually, exports are a MapValue (passed by reference).
-    m1.mod_var = "modified";
-    assert_eq(m2.mod_var, "modified");
+    m1.mod_let = "modified";
+    assert_eq(m2.mod_let, "modified");
 }

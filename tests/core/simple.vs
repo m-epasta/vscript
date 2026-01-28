@@ -1,5 +1,5 @@
 // Simple working test
-x = 5
-y = 10
-z = x + y
+let x = 5
+let y = 10
+let z = x + y
 println(z)

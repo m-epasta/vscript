@@ -49,7 +49,7 @@ enum TokenType {
 	nil_keyword
 	true_keyword
 	false_keyword
-	var_keyword
+	let_keyword
 	struct_keyword
 	enum_keyword
 	match_keyword

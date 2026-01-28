@@ -1,5 +1,5 @@
 // Test maps and JSON support
-var m = {
+let m = {
     name: "Alice",
     age: 30,
     "has_pet": true,
@@ -16,8 +16,8 @@ m["city"] = "New York";
 print(m);
 
 print("Map Helpers:");
-var ks = keys(m);
-var vs = values(m);
+let ks = keys(m);
+let vs = values(m);
 print("Keys:");
 print(ks);
 print("Values:");
@@ -26,11 +26,11 @@ print("Has Key 'age':");
 print(has_key(m, "age"));
 
 print("JSON Support:");
-var json_str = json_encode(m);
+let json_str = json_encode(m);
 print("Encoded:");
 print(json_str);
 
-var decoded = json_decode(json_str);
+let decoded = json_decode(json_str);
 print("Decoded:");
 print(decoded);
 print("Decoded name:");

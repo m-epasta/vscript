@@ -1,7 +1,7 @@
 // Test Automatic Caching Attributes
 // Fibonacci with @[lru_cache] should be O(n) instead of O(2^n)
 
-var start = clock();
+let start = clock();
 
 @[lru_cache]
 fn fib(n) {
@@ -9,8 +9,8 @@ fn fib(n) {
     return fib(n - 1) + fib(n - 2);
 }
 
-var result = fib(35);
-var end = clock();
+let result = fib(35);
+let end = clock();
 
 println("fib(35) = " + to_string(result));
 println("Time taken: " + to_string(end - start) + "s");
@@ -24,7 +24,7 @@ class Calc {
     }
 }
 
-var c = Calc();
+let c = Calc();
 println(c.expensive(10));
 println(c.expensive(10)); // Should be cached (no compute message)
 println(c.expensive(20));

@@ -15,7 +15,7 @@ class Person {
     }
 }
 
-var p = Person("Alice", 30);
+let p = Person("Alice", 30);
 p.say_hello();
 p.celebrate_birthday();
 

@@ -2,7 +2,7 @@ fn add(a, b) {
     return a + b;
 }
 
-var mod_var = "loaded";
+let mod_var = "loaded";
 
 struct Point {
     x float

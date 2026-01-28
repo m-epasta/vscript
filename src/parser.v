@@ -84,7 +84,7 @@ fn (mut p Parser) declaration() !Stmt {
 		stmt = p.struct_declaration(attributes)!
 	} else if p.match_([.enum_keyword]) {
 		stmt = p.enum_declaration(attributes)!
-	} else if p.match_([.var_keyword]) {
+	} else if p.match_([.let_keyword]) {
 		if attributes.len > 0 {
 			return error('Cannot use attributes on variable declarations')
 		}
@@ -361,7 +361,7 @@ fn (mut p Parser) for_statement() !Stmt {
 	mut initializer := ?Stmt(none)
 	if p.match_([.semicolon]) {
 		initializer = none
-	} else if p.match_([.var_keyword]) {
+	} else if p.match_([.let_keyword]) {
 		initializer = p.var_declaration()!
 	} else {
 		initializer = p.expression_statement()!

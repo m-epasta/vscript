@@ -217,7 +217,7 @@ fn (s &Scanner) keyword_type(text string) TokenType {
 		'nil' { .nil_keyword }
 		'true' { .true_keyword }
 		'false' { .false_keyword }
-		'var' { .var_keyword }
+		'let' { .let_keyword }
 		'struct' { .struct_keyword }
 		'enum' { .enum_keyword }
 		'match' { .match_keyword }

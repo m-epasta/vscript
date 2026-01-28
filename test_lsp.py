@@ -59,7 +59,7 @@ def test_lsp():
         if proc.poll() is None:
             time.sleep(1)
             proc.terminate()
-        out, err = proc.communicate()
+        err = proc.communicate()
         if err:
             print("FINAL LSP LOG:", err)
 
