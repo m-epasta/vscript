@@ -1297,17 +1297,39 @@ fn (mut vm VM) call_value(callee Value, arg_count int) bool {
 			return true
 		}
 		StructValue {
-			if arg_count != callee.field_names.len {
-				if vm.runtime_error('Expected ${callee.field_names.len} arguments for struct ${callee.name} but got ${arg_count}') {
+			// Check if we have too many arguments
+			if arg_count > callee.field_names.len {
+				if vm.runtime_error('Expected at most ${callee.field_names.len} arguments for struct ${callee.name} but got ${arg_count}') {
 					return true
 				}
 				return false
 			}
+			
+			// Check if we have too few arguments (no defaults available)
+			required_fields := callee.field_names.len - callee.field_defaults.len
+			if arg_count < required_fields {
+				if vm.runtime_error('Expected at least ${required_fields} arguments for struct ${callee.name} but got ${arg_count}') {
+					return true
+				}
+				return false
+			}
+			
 			mut fields := map[string]Value{}
+			
+			// Pop arguments from stack (in reverse order)
 			for i := 0; i < arg_count; i++ {
 				name := callee.field_names[arg_count - 1 - i]
 				fields[name] = vm.pop()
 			}
+			
+			// Fill in defaults for remaining fields
+			for i := arg_count; i < callee.field_names.len; i++ {
+				name := callee.field_names[i]
+				if default_val := callee.field_defaults[name] {
+					fields[name] = default_val
+				}
+			}
+			
 			slot := vm.stack.len - 1
 			vm.stack[slot] = StructInstanceValue{
 				struct_type: callee
