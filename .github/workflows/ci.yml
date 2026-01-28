@@ -26,6 +26,7 @@ jobs:
           cd v
           make
           cp -r vlib "$GITHUB_WORKSPACE/vlib"
+          chmod +x v/v
           echo "VLIB_PATH=$GITHUB_WORKSPACE/vlib" >> $GITHUB_ENV
           echo "V_BIN=$GITHUB_WORKSPACE/v/v" >> $GITHUB_ENV
         shell: bash
