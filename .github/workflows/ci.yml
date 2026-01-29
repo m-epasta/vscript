@@ -82,10 +82,34 @@ jobs:
           done
         shell: bash
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Test transpilation to JavaScript
         run: |
-          ./vscript --js tests/test_simple.vs > test_simple.js
-          node --check test_simple.js
-          ./vscript --js tests/test_bind.vs > test_bind.js
-          node --check test_bind.js
+          set -euo pipefail
+          mkdir -p js_temp
+          found=0
+          for test_file in tests/js/*.vs; do
+            if [ -f "$test_file" ]; then
+              found=1
+              base=$(basename "$test_file" .vs)
+              echo "Transpiling $test_file -> js_temp/$base.js"
+              ./vscript --js "$test_file" > "js_temp/$base.js"
+              echo "Checking syntax for js_temp/$base.js"
+              node --check "js_temp/$base.js"
+              echo "Running js_temp/$base.js with node"
+              node "js_temp/$base.js"
+              if [ $? -ne 0 ]; then
+                echo "FAILED runtime: $test_file"
+                exit 1
+              fi
+              echo "OK: $test_file"
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No JS test files found in tests/js"
+          fi
         shell: bash
