@@ -1,5 +1,5 @@
 // Complete vscript test - all features!
-let x = 10
+let x = 10;
 let y = 20
 println(x + y)
 
